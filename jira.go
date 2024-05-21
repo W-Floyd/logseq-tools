@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"regexp"
 	"slices"
@@ -191,22 +190,6 @@ func (c JiraConfig) createClient() (*jira.Client, error) {
 		APIToken: c.APIToken,
 	}
 	return jira.NewClient(c.BaseURL, tp.Client())
-}
-
-func findProject(client *jira.Client, projectName string) (*jira.Project, error) {
-	p, _, err := client.Project.GetAll(context.Background(), &jira.GetQueryOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, pro := range *p {
-		if pro.Name == projectName {
-			project, _, err := client.Project.Get(context.Background(), pro.ID)
-			return project, err
-		}
-	}
-
-	return nil, errors.New("Cannot find specified project " + projectName)
 }
 
 // https://github.com/andygrunwald/go-jira/issues/55#issuecomment-676631140
