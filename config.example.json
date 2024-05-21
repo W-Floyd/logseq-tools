@@ -1,0 +1,17 @@
+{
+    "logseq_root": "../Notes",
+    "jira": {
+        "enabled": true,
+        "instances": [
+            {
+                "base_url": "https://mycompany.atlassian.net/",
+                "username": "username@email.com",
+                "api_token": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+                "projects": [
+                    "XXXXX",
+                    "XXXXX"
+                ]
+            }
+        ]
+    }
+}
