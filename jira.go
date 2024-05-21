@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
@@ -19,7 +21,7 @@ type JiraConfig struct {
 	Projects []string `json:"projects"`
 }
 
-func (c JiraConfig) Process() error {
+func (c JiraConfig) Process(wg *sync.WaitGroup) error {
 
 	client, err := c.createClient()
 	if err != nil {
@@ -28,7 +30,7 @@ func (c JiraConfig) Process() error {
 
 	for _, project := range c.Projects {
 
-		err := ProcessProject(c, client, project)
+		err := ProcessProject(wg, c, client, project)
 		if err != nil {
 			return err
 		}
@@ -39,7 +41,7 @@ func (c JiraConfig) Process() error {
 
 }
 
-func ProcessProject(c JiraConfig, client *jira.Client, project string) error {
+func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, project string) error {
 
 	log.Println("Processing Project: " + project)
 
@@ -49,7 +51,11 @@ func ProcessProject(c JiraConfig, client *jira.Client, project string) error {
 	}
 
 	for _, issue := range issues {
-		err := ProcessIssue(c, issue)
+		wg.Add(1)
+		go func() error {
+			defer wg.Done()
+			return ProcessIssue(wg, c, client, issue)
+		}()
 		if err != nil {
 			return err
 		}
@@ -59,20 +65,51 @@ func ProcessProject(c JiraConfig, client *jira.Client, project string) error {
 
 }
 
-func ProcessIssue(c JiraConfig, issue jira.Issue) error {
+func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue jira.Issue) error {
+
+	if !config.Jira.IncludeDone && func() bool {
+		for _, n := range config.Jira.DoneStatus {
+			if issue.Fields.Status.Name == n {
+				return true
+			}
+		}
+		return false
+	}() {
+		return nil
+	}
 
 	log.Println("Processing Issue: " + issue.Key)
 
 	output := []string{
 		"alias:: " + issue.Key,
 		"title:: " + issue.Key + " | " + issue.Fields.Summary,
-		"exclude-from-graph-view:: true",
 		"type:: jira-ticket",
 		"url:: " + c.BaseURL + "browse/" + issue.Key,
 		"description:: " + issue.Fields.Summary,
 		"status:: " + issue.Fields.Status.Name,
 		"date_created:: [[" + DateFormat(time.Time(issue.Fields.Created)) + "]]",
 		"date_created_sortable:: " + time.Time(issue.Fields.Created).Format("2006/01/02"),
+	}
+
+	if config.Jira.ExcludeFromGraph {
+		output = append(output, "exclude-from-graph-view:: true")
+	}
+
+	if config.Jira.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
+
+		watchers := []string{}
+
+		users, _, err := client.Issue.GetWatchers(context.Background(), issue.ID)
+		if err != nil {
+			return err
+		}
+		for _, u := range *users {
+			watchers = append(watchers, "[["+u.DisplayName+"]]")
+		}
+
+		slices.Sort(watchers)
+
+		output = append(output, "watchers:: "+strings.Join(watchers, ", "))
 	}
 
 	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {

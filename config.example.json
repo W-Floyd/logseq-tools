@@ -2,6 +2,13 @@
     "logseq_root": "../Notes",
     "jira": {
         "enabled": true,
+        "include_watchers": true,
+        "exclude_from_graph": false,
+        "include_done": true,
+        "done_status": [
+            "Done",
+            "Past"
+        ],
         "instances": [
             {
                 "base_url": "https://mycompany.atlassian.net/",
