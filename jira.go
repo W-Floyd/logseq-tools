@@ -175,8 +175,8 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue j
 				}
 				return "TODO"
 			}()+" [[Jira Task]] [["+issue.Key+"]]",
-			"  DEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-01 Mon")+">",
-			"  SCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-01 Mon")+">",
+			"  DEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
+			"  SCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
 		)
 	}
 
