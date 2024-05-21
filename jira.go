@@ -53,7 +53,9 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = ProcessIssue(wg, c, client, issue)
+			var fetchedIssue *jira.Issue
+			fetchedIssue, _, err = client.Issue.Get(context.Background(), issue.Key, nil)
+			err = ProcessIssue(wg, c, client, fetchedIssue)
 		}()
 		if err != nil {
 			return err
@@ -64,7 +66,7 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 
 }
 
-func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue jira.Issue) error {
+func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *jira.Issue) error {
 
 	if !config.Jira.IncludeDone && func() bool {
 		for _, n := range config.Jira.DoneStatus {
@@ -130,22 +132,7 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue j
 		)
 	}
 
-	description := strings.Split(JiraToMD(issue.Fields.Description), "\n")
-	descriptionFormatted := []string{""}
-
-	for _, l := range description {
-		if l == "" {
-			continue
-		}
-		if regexp.MustCompile(`^[0-9]+\. `).MatchString(l) {
-			l = regexp.MustCompile(`^[0-9]+\. `).ReplaceAllString(l, "")
-			descriptionFormatted = append(descriptionFormatted, "- "+l, "  logseq.order-list-type:: number")
-			continue
-		}
-		descriptionFormatted = append(descriptionFormatted, "- "+l)
-	}
-
-	output = append(output, descriptionFormatted...)
+	output = append(output, ParseJiraText(issue.Fields.Description)...)
 
 	if issue.Fields.IssueLinks != nil {
 		links := map[string]([]string){}
@@ -187,6 +174,15 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue j
 		)
 	}
 
+	if config.Jira.IncludeComments && issue.Fields.Comments != nil {
+		output = append(output, "- ### Comments")
+		for _, c := range issue.Fields.Comments.Comments {
+			output = append(output, "- [["+c.Author.DisplayName+"]] - Created: "+c.Created+" | Updated: "+c.Updated)
+			output = append(output, PrefixStringSlice(ParseJiraText(c.Body), "  ")...)
+			output = append(output, "***")
+		}
+	}
+
 	return WritePage(issue.Key, []byte(strings.Join(output, "\n")))
 
 }
@@ -225,4 +221,29 @@ func GetIssues(client *jira.Client, searchString string) ([]jira.Issue, error) {
 		}
 	}
 	return issues, nil
+}
+
+func ParseJiraText(input string) []string {
+	description := strings.Split(JiraToMD(input), "\n")
+	descriptionFormatted := []string{""}
+
+	for _, l := range description {
+		if l == "" {
+			continue
+		}
+		if regexp.MustCompile(`^[0-9]+\. `).MatchString(l) {
+			l = regexp.MustCompile(`^[0-9]+\. `).ReplaceAllString(l, "")
+			descriptionFormatted = append(descriptionFormatted, "- "+l, "  logseq.order-list-type:: number")
+			continue
+		}
+		descriptionFormatted = append(descriptionFormatted, "- "+l)
+	}
+	return descriptionFormatted
+}
+
+func PrefixStringSlice(i []string, p string) (o []string) {
+	for _, l := range i {
+		o = append(o, p+l)
+	}
+	return
 }
