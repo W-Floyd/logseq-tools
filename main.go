@@ -50,10 +50,9 @@ func main() {
 
 		for _, instance := range config.Jira.Instances {
 			wg.Add(1)
-			go func() error {
+			go func() {
 				defer wg.Done()
-				return instance.Process(&wg)
-
+				err = instance.Process(&wg)
 			}()
 			if err != nil {
 				log.Fatalln(err)

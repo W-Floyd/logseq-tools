@@ -52,9 +52,9 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 
 	for _, issue := range issues {
 		wg.Add(1)
-		go func() error {
+		go func() {
 			defer wg.Done()
-			return ProcessIssue(wg, c, client, issue)
+			err = ProcessIssue(wg, c, client, issue)
 		}()
 		if err != nil {
 			return err
