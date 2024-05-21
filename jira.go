@@ -130,15 +130,22 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue j
 		)
 	}
 
-	output = append(output,
-		"",
-		"- "+func(input string) string {
-			output := input
-			output = regexp.MustCompile("\n#").ReplaceAllString(output, "\n    - ")
-			output = regexp.MustCompile("\n\n").ReplaceAllString(output, "\n")
-			return output
-		}(issue.Fields.Description),
-	)
+	description := strings.Split(JiraToMD(issue.Fields.Description), "\n")
+	descriptionFormatted := []string{""}
+
+	for _, l := range description {
+		if l == "" {
+			continue
+		}
+		if regexp.MustCompile(`^[0-9]+\. `).MatchString(l) {
+			l = regexp.MustCompile(`^[0-9]+\. `).ReplaceAllString(l, "")
+			descriptionFormatted = append(descriptionFormatted, "- "+l, "  logseq.order-list-type:: number")
+			continue
+		}
+		descriptionFormatted = append(descriptionFormatted, "- "+l)
+	}
+
+	output = append(output, descriptionFormatted...)
 
 	if issue.Fields.IssueLinks != nil {
 		links := map[string]([]string){}
