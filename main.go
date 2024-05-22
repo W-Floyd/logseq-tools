@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,7 +28,10 @@ type Config struct {
 	} `json:"jira"`
 }
 
-var config = Config{}
+var (
+	config           = Config{}
+	jiraApiCallCount = 0
+)
 
 func main() {
 
@@ -63,6 +67,10 @@ func main() {
 	}
 
 	wg.Wait()
+
+	if config.Jira.Enabled {
+		log.Println("Jira API calls: " + strconv.Itoa(jiraApiCallCount))
+	}
 
 }
 

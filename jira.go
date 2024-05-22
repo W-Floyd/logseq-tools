@@ -53,9 +53,7 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var fetchedIssue *jira.Issue
-			fetchedIssue, _, err = client.Issue.Get(context.Background(), issue.Key, nil)
-			err = ProcessIssue(wg, c, client, fetchedIssue, project)
+			err = ProcessIssue(wg, c, client, &issue, project)
 		}()
 		if err != nil {
 			return err
@@ -66,7 +64,14 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 
 }
 
-func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *jira.Issue, project string) error {
+func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *jira.Issue, project string) (err error) {
+
+	var fetchedIssue *jira.Issue // Use GetIssue() on this to populate on first use, but reuse therafter
+	// Like so:
+	// fetchedIssue, err = GetIssue(client, issue, fetchedIssue)
+	// if err!=nil{
+	//   return nil
+	// }
 
 	if !config.Jira.IncludeDone && func() bool {
 		for _, n := range config.Jira.DoneStatus {
@@ -101,6 +106,8 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 
 		watchers := []string{}
 
+		log.Println("Getting watchers for " + issue.Key)
+		jiraApiCallCount += 1
 		users, _, err := client.Issue.GetWatchers(context.Background(), issue.ID)
 		if err != nil {
 			return err
@@ -175,12 +182,18 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 		)
 	}
 
-	if config.Jira.IncludeComments && issue.Fields.Comments != nil {
-		output = append(output, "- ### Comments")
-		for _, c := range issue.Fields.Comments.Comments {
-			output = append(output, "- [["+c.Author.DisplayName+"]] - Created: "+c.Created+" | Updated: "+c.Updated)
-			output = append(output, PrefixStringSlice(ParseJiraText(c.Body), "  ")...)
-			output = append(output, "***")
+	if config.Jira.IncludeComments {
+		fetchedIssue, err = GetIssue(client, issue, fetchedIssue)
+		if err != nil {
+			return err
+		}
+		if fetchedIssue.Fields.Comments != nil {
+			output = append(output, "- ### Comments")
+			for _, c := range fetchedIssue.Fields.Comments.Comments {
+				output = append(output, "- [["+c.Author.DisplayName+"]] - Created: "+c.Created+" | Updated: "+c.Updated)
+				output = append(output, PrefixStringSlice(ParseJiraText(c.Body), "  ")...)
+				output = append(output, "***")
+			}
 		}
 	}
 
@@ -247,4 +260,15 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 		o = append(o, p+l)
 	}
 	return
+}
+
+func GetIssue(client *jira.Client, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
+	if fullIssueCheck == nil {
+		log.Println("Fetching specific info for " + sparseIssue.Key)
+		jiraApiCallCount += 1
+		fullIssue, _, err = client.Issue.Get(context.Background(), sparseIssue.Key, nil)
+	} else {
+		fullIssue = fullIssueCheck
+	}
+	return fullIssue, err
 }
