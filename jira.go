@@ -96,6 +96,10 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 				matcher: `/`,
 				repl:    `／`,
 			},
+			{ // Replace [[text]] with (text)
+				matcher: `\[\[ *([^\]]+) *\]\]`,
+				repl:    `( $1 )`,
+			},
 		}),
 		"type:: jira-ticket",
 		"project:: " + project,
