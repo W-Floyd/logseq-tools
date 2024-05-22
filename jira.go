@@ -55,7 +55,7 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 			defer wg.Done()
 			var fetchedIssue *jira.Issue
 			fetchedIssue, _, err = client.Issue.Get(context.Background(), issue.Key, nil)
-			err = ProcessIssue(wg, c, client, fetchedIssue)
+			err = ProcessIssue(wg, c, client, fetchedIssue, project)
 		}()
 		if err != nil {
 			return err
@@ -66,7 +66,7 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 
 }
 
-func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *jira.Issue) error {
+func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *jira.Issue, project string) error {
 
 	if !config.Jira.IncludeDone && func() bool {
 		for _, n := range config.Jira.DoneStatus {
@@ -85,6 +85,7 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 		"alias:: " + issue.Key,
 		"title:: " + issue.Key + " | " + issue.Fields.Summary,
 		"type:: jira-ticket",
+		"project:: " + project,
 		"url:: " + c.BaseURL + "browse/" + issue.Key,
 		"description:: " + issue.Fields.Summary,
 		"status:: " + issue.Fields.Status.Name,
