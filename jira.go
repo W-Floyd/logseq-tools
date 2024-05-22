@@ -88,7 +88,15 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 
 	output := []string{
 		"alias:: " + issue.Key,
-		"title:: " + issue.Key + " | " + issue.Fields.Summary,
+		"title:: " + issue.Key + " | " + SearchAndReplace(issue.Fields.Summary, []struct {
+			matcher string
+			repl    string
+		}{
+			{ // Replace slash with FULLWIDTH SOLIDUS to prevent hierarchy pages being made
+				matcher: `/`,
+				repl:    `／`,
+			},
+		}),
 		"type:: jira-ticket",
 		"project:: " + project,
 		"url:: " + c.BaseURL + "browse/" + issue.Key,
