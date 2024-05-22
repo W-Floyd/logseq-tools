@@ -8,6 +8,7 @@
                 "include_comments": true,
                 "exclude_from_graph": true,
                 "include_done": true,
+                "link_names": false,
                 "connection":{
                     "base_url": "https://mycompany.atlassian.net/",
                     "username": "username@email.com",

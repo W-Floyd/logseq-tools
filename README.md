@@ -29,4 +29,5 @@ It is recommended to have the following settings to prevent Logseq slowdowns whe
 
 ```json
 "exclude_from_graph": true // Adds 'exclude-from-graph-view:: true' to each page, greatly cleaning up the graph page
+"link_names": false // Don't [[link]] names, which creates a lot of graph connections, especially if the above is false
 ```

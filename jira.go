@@ -26,6 +26,7 @@ type JiraConfig struct {
 	ExcludeFromGraph bool     `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
 	IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
 	DoneStatus       []string `json:"done_status"`        // Names to consider as done
+	LinkNames        bool     `json:"link_names"`         // Whether to [[link]] names
 
 	// TODO - Implement
 	// IncludeURL       bool         `json:"include_url"`        // Whether to include the URL in the page name to disambiguate instances
@@ -154,7 +155,11 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 		}
 		jiraApiCallCount += 1
 		for _, u := range *users {
-			watchers = append(watchers, "[["+u.DisplayName+"]]")
+			nameText := u.DisplayName
+			if c.LinkNames {
+				nameText = "[[" + nameText + "]]"
+			}
+			watchers = append(watchers, nameText)
 		}
 
 		slices.Sort(watchers)
@@ -170,15 +175,19 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 	}
 
 	if issue.Fields.Assignee != nil {
-		output = append(output,
-			"assignee:: [["+issue.Fields.Assignee.DisplayName+"]]",
-		)
+		nameText := issue.Fields.Assignee.DisplayName
+		if c.LinkNames {
+			nameText = "[[" + nameText + "]]"
+		}
+		output = append(output, "assignee:: "+nameText)
 	}
 
 	if issue.Fields.Reporter != nil {
-		output = append(output,
-			"reporter:: [["+issue.Fields.Reporter.DisplayName+"]]",
-		)
+		nameText := issue.Fields.Reporter.DisplayName
+		if c.LinkNames {
+			nameText = "[[" + nameText + "]]"
+		}
+		output = append(output, "reporter:: "+nameText)
 	}
 
 	output = append(output, ParseJiraText(issue.Fields.Description)...)
@@ -230,9 +239,13 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 		}
 		if fetchedIssue.Fields.Comments != nil {
 			output = append(output, "- ### Comments")
-			for _, c := range fetchedIssue.Fields.Comments.Comments {
-				output = append(output, "- [["+c.Author.DisplayName+"]] - Created: "+c.Created+" | Updated: "+c.Updated)
-				output = append(output, PrefixStringSlice(ParseJiraText(c.Body), "  ")...)
+			for _, comment := range fetchedIssue.Fields.Comments.Comments {
+				nameText := comment.Author.DisplayName
+				if c.LinkNames {
+					nameText = "[[" + nameText + "]]"
+				}
+				output = append(output, "- "+nameText+" - Created: "+comment.Created+" | Updated: "+comment.Updated)
+				output = append(output, PrefixStringSlice(ParseJiraText(comment.Body), "  ")...)
 				output = append(output, "***")
 			}
 		}
