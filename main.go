@@ -16,15 +16,7 @@ import (
 type Config struct {
 	LogseqRoot string `json:"logseq_root"`
 	Jira       struct {
-		Enabled          bool     `json:"enabled"`            // Whether to process Jira
-		IncludeWatchers  bool     `json:"include_watchers"`   // This can be slow, so you may want to disable it
-		IncludeComments  bool     `json:"include_comments"`   // This can be slow, so you may want to disable it
-		ExcludeFromGraph bool     `json:"exclude_from_graph"` // If you have a lot of these, it can easily polute your graph
-		IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
-		DoneStatus       []string `json:"done_status"`        // Names to consider as done
-		// TODO - Implement
-		// IncludeURL       bool         `json:"include_url"`        // Whether to include the URL in the page name to disambiguate instances
-		Instances []JiraConfig `json:"instances"` // Jira instances to process
+		Instances []*JiraConfig `json:"instances"` // Jira instances to process
 	} `json:"jira"`
 }
 
@@ -51,24 +43,22 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	if config.Jira.Enabled {
-
-		for _, instance := range config.Jira.Instances {
+	for _, instance := range config.Jira.Instances {
+		if instance.Enabled {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				err = instance.Process(&wg)
+				if err != nil {
+					log.Fatalln(err)
+				}
 			}()
-			if err != nil {
-				log.Fatalln(err)
-			}
 		}
-
 	}
 
 	wg.Wait()
 
-	if config.Jira.Enabled {
+	if jiraApiCallCount > 0 {
 		log.Println("Jira API calls: " + strconv.Itoa(jiraApiCallCount))
 	}
 

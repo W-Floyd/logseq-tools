@@ -1,20 +1,22 @@
 {
     "logseq_root": "../Notes",
     "jira": {
-        "enabled": true,
-        "include_watchers": true,
-        "include_comments": true,
-        "exclude_from_graph": false,
-        "include_done": true,
-        "done_status": [
-            "Done",
-            "Past"
-        ],
         "instances": [
             {
-                "base_url": "https://mycompany.atlassian.net/",
-                "username": "username@email.com",
-                "api_token": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+                "enabled": true,
+                "include_watchers": true,
+                "include_comments": true,
+                "exclude_from_graph": true,
+                "include_done": true,
+                "connection":{
+                    "base_url": "https://mycompany.atlassian.net/",
+                    "username": "username@email.com",
+                    "api_token": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+                },
+                "done_status": [
+                    "Done",
+                    "Past"
+                ],
                 "projects": [
                     "XXXXX",
                     "XXXXX"

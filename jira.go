@@ -14,22 +14,38 @@ import (
 )
 
 type JiraConfig struct {
-	BaseURL  string   `json:"base_url"`
-	Username string   `json:"username"`
-	APIToken string   `json:"api_token"`
-	Projects []string `json:"projects"`
+	Connection struct {
+		BaseURL  string `json:"base_url"`
+		Username string `json:"username"`
+		APIToken string `json:"api_token"`
+	} `json:"connection"`
+	Projects         []string `json:"projects"`           // XXXXX string identifier of projects to process
+	Enabled          bool     `json:"enabled"`            // Whether to process this Jira instance
+	IncludeWatchers  bool     `json:"include_watchers"`   // This can be slow, so you may want to disable it
+	IncludeComments  bool     `json:"include_comments"`   // This can be slow, so you may want to disable it
+	ExcludeFromGraph bool     `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
+	IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
+	DoneStatus       []string `json:"done_status"`        // Names to consider as done
+
+	// TODO - Implement
+	// IncludeURL       bool         `json:"include_url"`        // Whether to include the URL in the page name to disambiguate instances
+
+	apiLimited *sync.Mutex  // Lock this to prevent calls while API cools down, unlock once done
+	client     *jira.Client // Client to use for communication
 }
 
-func (c JiraConfig) Process(wg *sync.WaitGroup) error {
+func (c *JiraConfig) Process(wg *sync.WaitGroup) (err error) {
 
-	client, err := c.createClient()
+	c.apiLimited = &sync.Mutex{}
+
+	c.client, err = c.createClient()
 	if err != nil {
 		return err
 	}
 
 	for _, project := range c.Projects {
 
-		err := ProcessProject(wg, c, client, project)
+		err = ProcessProject(wg, c, project)
 		if err != nil {
 			return err
 		}
@@ -40,11 +56,11 @@ func (c JiraConfig) Process(wg *sync.WaitGroup) error {
 
 }
 
-func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, project string) error {
+func ProcessProject(wg *sync.WaitGroup, c *JiraConfig, project string) error {
 
 	log.Println("Processing Project: " + project)
 
-	issues, err := GetIssues(client, "project = "+project)
+	issues, err := GetIssues(c, "project = "+project)
 	if err != nil {
 		return err
 	}
@@ -53,7 +69,7 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err = ProcessIssue(wg, c, client, &issue, project)
+			err = ProcessIssue(wg, c, &issue, project)
 		}()
 		if err != nil {
 			return err
@@ -64,17 +80,17 @@ func ProcessProject(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, proje
 
 }
 
-func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *jira.Issue, project string) (err error) {
+func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project string) (err error) {
 
-	var fetchedIssue *jira.Issue // Use GetIssue() on this to populate on first use, but reuse therafter
+	var fetchedIssue *jira.Issue // Use GetIssue() on this to populate on first use, but reuse thereafter
 	// Like so:
 	// fetchedIssue, err = GetIssue(client, issue, fetchedIssue)
 	// if err!=nil{
 	//   return nil
 	// }
 
-	if !config.Jira.IncludeDone && func() bool {
-		for _, n := range config.Jira.DoneStatus {
+	if !c.IncludeDone && func() bool {
+		for _, n := range c.DoneStatus {
 			if issue.Fields.Status.Name == n {
 				return true
 			}
@@ -103,27 +119,40 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 		}),
 		"type:: jira-ticket",
 		"project:: " + project,
-		"url:: " + c.BaseURL + "browse/" + issue.Key,
+		"url:: " + c.Connection.BaseURL + "browse/" + issue.Key,
 		"description:: " + issue.Fields.Summary,
 		"status:: " + issue.Fields.Status.Name,
 		"date_created:: [[" + DateFormat(time.Time(issue.Fields.Created)) + "]]",
 		"date_created_sortable:: " + time.Time(issue.Fields.Created).Format("2006/01/02"),
 	}
 
-	if config.Jira.ExcludeFromGraph {
+	if c.ExcludeFromGraph {
 		output = append(output, "exclude-from-graph-view:: true")
 	}
 
-	if config.Jira.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
+	if c.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
 
 		watchers := []string{}
 
 		log.Println("Getting watchers for " + issue.Key)
-		jiraApiCallCount += 1
-		users, _, err := client.Issue.GetWatchers(context.Background(), issue.ID)
-		if err != nil {
-			return err
+		c.apiLimited.Lock()
+		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
+		var users *[]jira.User
+		var resp *jira.Response
+		for {
+			retry := false
+			users, resp, err = c.client.Issue.GetWatchers(context.Background(), issue.ID)
+			if err != nil {
+				retry, err = CheckAPILimit(c, resp)
+				if err != nil {
+					return err
+				}
+			}
+			if !retry {
+				break
+			}
 		}
+		jiraApiCallCount += 1
 		for _, u := range *users {
 			watchers = append(watchers, "[["+u.DisplayName+"]]")
 		}
@@ -194,8 +223,8 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 		)
 	}
 
-	if config.Jira.IncludeComments {
-		fetchedIssue, err = GetIssue(client, issue, fetchedIssue)
+	if c.IncludeComments {
+		fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
 		if err != nil {
 			return err
 		}
@@ -213,25 +242,43 @@ func ProcessIssue(wg *sync.WaitGroup, c JiraConfig, client *jira.Client, issue *
 
 }
 
-func (c JiraConfig) createClient() (*jira.Client, error) {
+func (c *JiraConfig) createClient() (*jira.Client, error) {
 	tp := jira.BasicAuthTransport{
-		Username: c.Username,
-		APIToken: c.APIToken,
+		Username: c.Connection.Username,
+		APIToken: c.Connection.APIToken,
 	}
-	return jira.NewClient(c.BaseURL, tp.Client())
+	return jira.NewClient(c.Connection.BaseURL, tp.Client())
 }
 
-// https://github.com/andygrunwald/go-jira/issues/55#issuecomment-676631140
-func GetIssues(client *jira.Client, searchString string) ([]jira.Issue, error) {
+// Modified from https://github.com/andygrunwald/go-jira/issues/55#issuecomment-676631140
+func GetIssues(c *JiraConfig, searchString string) (issues []jira.Issue, err error) {
 	last := 0
-	var issues []jira.Issue = nil
 	for {
 		opt := &jira.SearchOptions{
 			MaxResults: 100,
 			StartAt:    last,
 		}
 
-		chunk, resp, err := client.Issue.Search(context.Background(), searchString, opt)
+		var resp *jira.Response
+		var chunk []jira.Issue
+		c.apiLimited.Lock()
+		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
+
+		for {
+			log.Println("Getting chunk")
+			retry := false
+			chunk, resp, err = c.client.Issue.Search(context.Background(), searchString, opt)
+			if err != nil {
+				retry, err = CheckAPILimit(c, resp)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if !retry {
+				break
+			}
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -274,13 +321,53 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 	return
 }
 
-func GetIssue(client *jira.Client, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
+func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
 	if fullIssueCheck == nil {
 		log.Println("Fetching specific info for " + sparseIssue.Key)
+		c.apiLimited.Lock()
+		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
+
+		var resp *jira.Response
+		for {
+			retry := false
+			fullIssue, resp, err = c.client.Issue.Get(context.Background(), sparseIssue.Key, nil)
+			if err != nil {
+				retry, err = CheckAPILimit(c, resp)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if !retry {
+				break
+			}
+		}
+
+		if err != nil {
+			return nil, err
+		}
 		jiraApiCallCount += 1
-		fullIssue, _, err = client.Issue.Get(context.Background(), sparseIssue.Key, nil)
 	} else {
 		fullIssue = fullIssueCheck
 	}
 	return fullIssue, err
+}
+
+func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
+	if resp.StatusCode == 429 {
+		retry = true
+		c.apiLimited.Lock()
+		resetTime, err := time.Parse("2006-01-02T15:04Z", resp.Response.Header.Get("X-Ratelimit-Reset"))
+		if err != nil {
+			return false, err
+		}
+		resetTime = resetTime.Add(time.Second * 1) // Add one second buffer just in case
+		log.Println("API calls exhausted, sleeping until ", resetTime)
+		time.Sleep(time.Until(resetTime))
+		log.Println("Waking up, API should be usable again, retrying last call.")
+		c.apiLimited.Unlock()
+	} else {
+		retry = false
+	}
+
+	return
 }
