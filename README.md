@@ -31,3 +31,25 @@ It is recommended to have the following settings to prevent Logseq slowdowns whe
 "exclude_from_graph": true // Adds 'exclude-from-graph-view:: true' to each page, greatly cleaning up the graph page
 "link_names": false // Don't [[link]] names, which creates a lot of graph connections, especially if the above is false
 ```
+
+## Logseq Queries
+
+### Overdue Issues
+
+``` clojure
+#+BEGIN_QUERY
+{
+:query [:find (pull ?p [*])
+:in $ ?end
+:where
+[?p :block/properties ?properties]
+[(get ?properties :date-due-sortable) ?datedue]
+(page-property ?p :type  "jira-ticket")
+[(get ?properties :status) ?status]
+(not [(contains? #{"Done" "Past"} ?status)])
+[(< ?datedue ?end)]
+ ]
+:inputs [:today]
+}
+#+END_QUERY
+```
