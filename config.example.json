@@ -8,7 +8,9 @@
                 "include_comments": true,
                 "exclude_from_graph": true,
                 "include_done": true,
+                "include_task": false,
                 "link_names": false,
+                "search_users": false,
                 "connection":{
                     "base_url": "https://mycompany.atlassian.net/",
                     "username": "username@email.com",
@@ -21,7 +23,13 @@
                 "projects": [
                     "XXXXX",
                     "XXXXX"
-                ]
+                ],
+                "actions": {
+                    "watch_all": {
+                        "enabled": false,
+                        "display_name": "your display name"
+                    }
+                }
             }
         ]
     }

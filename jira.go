@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
+	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
 )
 
 type JiraConfig struct {
@@ -25,8 +30,17 @@ type JiraConfig struct {
 	IncludeComments  bool     `json:"include_comments"`   // This can be slow, so you may want to disable it
 	ExcludeFromGraph bool     `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
 	IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
+	IncludeTask      bool     `json:"include_task"`       // Whether to include a task on each item with a due date
 	DoneStatus       []string `json:"done_status"`        // Names to consider as done
 	LinkNames        bool     `json:"link_names"`         // Whether to [[link]] names
+	SearchUsers      bool     `json:"search_users"`       // Whether to search users - may not be possible due to permissions
+
+	Actions struct {
+		WatchAll struct {
+			Enabled     bool   `json:"enabled"`
+			DisplayName string `json:"display_name"`
+		} `json:"watch_all"`
+	} `json:"actions"`
 
 	// TODO - Implement
 	// IncludeURL       bool         `json:"include_url"`        // Whether to include the URL in the page name to disambiguate instances
@@ -35,60 +49,109 @@ type JiraConfig struct {
 	client     *jira.Client // Client to use for communication
 }
 
-func (c *JiraConfig) Process(wg *sync.WaitGroup) (err error) {
+var (
+	issuesStore []*jira.Issue          = []*jira.Issue{}
+	users       map[string]string      = map[string]string{}
+	usersLock   *sync.Mutex            = &sync.Mutex{}
+	issues      map[string]*jira.Issue = map[string]*jira.Issue{}
+	parents     map[string]*string     = map[string]*string{}
+	children    map[string][]string    = map[string][]string{}
+)
+
+func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
 	c.apiLimited = &sync.Mutex{}
 
 	c.client, err = c.createClient()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Couldn't create a client")
 	}
 
 	for _, project := range c.Projects {
 
 		err = ProcessProject(wg, c, project)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "Failed processing project "+project)
 		}
-
 	}
 
 	return nil
 
 }
 
-func ProcessProject(wg *sync.WaitGroup, c *JiraConfig, project string) error {
+func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
+
+	ctx := context.Background()
+	errs, _ := errgroup.WithContext(ctx)
 
 	log.Println("Processing Project: " + project)
 
 	issues, err := GetIssues(c, "project = "+project)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Couldn't get issues for project "+project)
 	}
 
 	for _, issue := range issues {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err = ProcessIssue(wg, c, &issue, project)
-		}()
-		if err != nil {
-			return err
-		}
+		issue := issue
+		errs.Go(func() error {
+			err := ProcessIssue(wg, c, &issue, project)
+			return errors.Wrap(err, "Failed to ProcessIssue "+issue.Key)
+		})
 	}
 
-	return nil
+	return errors.Wrap(errs.Wait(), "Goroutine failed from ProcessProject")
 
 }
 
-func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project string) (err error) {
+func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project string) (err error) {
 
-	var fetchedIssue *jira.Issue // Use GetIssue() on this to populate on first use, but reuse thereafter
+	var fetchedIssue *jira.Issue // Use GetIssue() on this to populate on first use, and reuse thereafter
+	watchers := &[]string{}      // use GetWatchers() on this to populate on first use, and reuse thereafter
 	// Like so:
-	// fetchedIssue, err = GetIssue(client, issue, fetchedIssue)
+	// fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
 	// if err!=nil{
 	//   return nil
 	// }
+
+	// TODO - Fix watching issues, doesn't work last I knew
+	c.Actions.WatchAll.Enabled = false
+
+	if c.Actions.WatchAll.Enabled {
+
+		watching := false
+
+		err = GetWatchers(c, issue, watchers)
+		if err != nil {
+			return errors.Wrap(err, "Couldn't get watchers for "+issue.Key)
+		}
+
+		for _, w := range *watchers {
+			if w == c.Actions.WatchAll.DisplayName {
+				watching = true
+			}
+		}
+
+		if !watching {
+			log.Println("Not watching " + issue.Key + ", adding " + c.Actions.WatchAll.DisplayName + " as a watcher now")
+
+			_, _, err = APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+				resp, err = c.client.Issue.AddWatcher(context.Background(), a[0].(string), a[1].(string))
+				if err != nil {
+					return output, resp, errors.Wrap(err, "Failed adding watcher "+a[1].(string)+" to "+a[0].(string))
+				}
+				err = resp.Body.Close()
+				return output, resp, errors.Wrap(err, "Failed to close response body when adding watcher "+a[1].(string)+" to "+a[0].(string))
+			}, []any{
+				issue.ID,
+				c.Connection.Username,
+			})
+			if err != nil {
+				return errors.Wrap(err, "Failed in APIWrapper")
+			}
+			*watchers = append(*watchers, c.Actions.WatchAll.DisplayName)
+		}
+
+	}
 
 	if !c.IncludeDone && func() bool {
 		for _, n := range c.DoneStatus {
@@ -105,26 +168,19 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 
 	output := []string{
 		"alias:: " + issue.Key,
-		"title:: " + issue.Key + " | " + SearchAndReplace(issue.Fields.Summary, []struct {
-			matcher string
-			repl    string
-		}{
-			{ // Replace slash with FULLWIDTH SOLIDUS to prevent hierarchy pages being made
-				matcher: `/`,
-				repl:    `／`,
-			},
-			{ // Replace [[text]] with (text)
-				matcher: `\[\[ *([^\]]+) *\]\]`,
-				repl:    `( $1 )`,
-			},
-		}),
+		"title:: " + LogseqTitle(issue),
 		"type:: jira-ticket",
-		"project:: " + project,
+		"jira-type:: " + issue.Fields.Type.Description,
+		"jira-project:: " + project,
 		"url:: " + c.Connection.BaseURL + "browse/" + issue.Key,
-		"description:: " + issue.Fields.Summary,
+		"description:: " + LogseqTransform(issue.Fields.Summary),
 		"status:: " + issue.Fields.Status.Name,
-		"date_created:: [[" + DateFormat(time.Time(issue.Fields.Created)) + "]]",
-		"date_created_sortable:: " + time.Time(issue.Fields.Created).Format("2006/01/02"),
+		"date-created:: [[" + DateFormat(time.Time(issue.Fields.Created)) + "]]",
+		"date-created-sortable:: " + time.Time(issue.Fields.Created).Format("20060102"),
+	}
+
+	if issue.Fields.Parent != nil {
+		output = append(output, "parent:: [["+issue.Fields.Parent.Key+"]]")
 	}
 
 	if c.ExcludeFromGraph {
@@ -133,44 +189,20 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 
 	if c.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
 
-		watchers := []string{}
-
-		log.Println("Getting watchers for " + issue.Key)
-		c.apiLimited.Lock()
-		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
-		var users *[]jira.User
-		var resp *jira.Response
-		for {
-			retry := false
-			users, resp, err = c.client.Issue.GetWatchers(context.Background(), issue.ID)
-			if err != nil {
-				retry, err = CheckAPILimit(c, resp)
-				if err != nil {
-					return err
-				}
-			}
-			if !retry {
-				break
-			}
-		}
-		jiraApiCallCount += 1
-		for _, u := range *users {
-			nameText := u.DisplayName
-			if c.LinkNames {
-				nameText = "[[" + nameText + "]]"
-			}
-			watchers = append(watchers, nameText)
+		err = GetWatchers(c, issue, watchers)
+		if err != nil {
+			return errors.Wrap(err, "Failed in GetWatchers")
 		}
 
-		slices.Sort(watchers)
+		slices.Sort(*watchers)
 
-		output = append(output, "watchers:: "+strings.Join(watchers, ", "))
+		output = append(output, "watchers:: "+strings.Join(*watchers, ", "))
 	}
 
 	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
 		output = append(output,
 			"date_due:: [["+DateFormat(time.Time(issue.Fields.Duedate))+"]]",
-			"date_due_sortable:: "+time.Time(issue.Fields.Duedate).Format("2006/01/02"),
+			"date_due_sortable:: "+time.Time(issue.Fields.Duedate).Format("20060102"),
 		)
 	}
 
@@ -190,7 +222,12 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 		output = append(output, "reporter:: "+nameText)
 	}
 
-	output = append(output, ParseJiraText(issue.Fields.Description)...)
+	line, err := ParseJiraText(c, issue.Fields.Description)
+	if err != nil {
+		return errors.Wrap(err, "Failed in ParseJiraText")
+	}
+
+	output = append(output, line...)
 
 	if issue.Fields.IssueLinks != nil {
 		links := map[string]([]string){}
@@ -217,7 +254,7 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 
 	}
 
-	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
+	if c.IncludeTask && time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
 		output = append(output,
 			"- ***",
 			"- "+func() string {
@@ -235,7 +272,7 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 	if c.IncludeComments {
 		fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "Failed in GetIssue")
 		}
 		if fetchedIssue.Fields.Comments != nil {
 			output = append(output, "- ### Comments")
@@ -245,10 +282,22 @@ func ProcessIssue(wg *sync.WaitGroup, c *JiraConfig, issue *jira.Issue, project 
 					nameText = "[[" + nameText + "]]"
 				}
 				output = append(output, "- "+nameText+" - Created: "+comment.Created+" | Updated: "+comment.Updated)
-				output = append(output, PrefixStringSlice(ParseJiraText(comment.Body), "  ")...)
+
+				line, err := ParseJiraText(c, comment.Body)
+				if err != nil {
+					return errors.Wrap(err, "Failed in ParseJiraText")
+				}
+
+				output = append(output, PrefixStringSlice(line, "  ")...)
 				output = append(output, "***")
 			}
 		}
+	}
+
+	if fetchedIssue == nil {
+		issuesStore = append(issuesStore, fetchedIssue)
+	} else {
+		issuesStore = append(issuesStore, issue)
 	}
 
 	return WritePage(issue.Key, []byte(strings.Join(output, "\n")))
@@ -272,29 +321,18 @@ func GetIssues(c *JiraConfig, searchString string) (issues []jira.Issue, err err
 			StartAt:    last,
 		}
 
-		var resp *jira.Response
-		var chunk []jira.Issue
-		c.apiLimited.Lock()
-		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
-
-		for {
-			log.Println("Getting chunk")
-			retry := false
-			chunk, resp, err = c.client.Issue.Search(context.Background(), searchString, opt)
-			if err != nil {
-				retry, err = CheckAPILimit(c, resp)
-				if err != nil {
-					return nil, err
-				}
-			}
-			if !retry {
-				break
-			}
-		}
-
+		o, resp, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+			output = make([]any, 1)
+			output[0], resp, err = c.client.Issue.Search(context.Background(), a[0].(string), a[1].(*jira.SearchOptions))
+			return output, resp, errors.Wrap(err, "Couldn't search issues using jql '"+a[0].(string)+"'")
+		}, []any{
+			searchString,
+			opt,
+		})
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "Failed in APIWrapper")
 		}
+		chunk := o[0].([]jira.Issue)
 
 		total := resp.Total
 		if issues == nil {
@@ -309,22 +347,73 @@ func GetIssues(c *JiraConfig, searchString string) (issues []jira.Issue, err err
 	return issues, nil
 }
 
-func ParseJiraText(input string) []string {
+func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}
 
 	for _, l := range description {
-		if l == "" {
+
+		lines := []string{l}
+		if lines[0] == "" {
 			continue
 		}
-		if regexp.MustCompile(`^[0-9]+\. `).MatchString(l) {
-			l = regexp.MustCompile(`^[0-9]+\. `).ReplaceAllString(l, "")
-			descriptionFormatted = append(descriptionFormatted, "- "+l, "  logseq.order-list-type:: number")
-			continue
+
+		listItem := false
+
+		// Bullet list
+		matcher := `^( *)\* `
+		if regexp.MustCompile(matcher).MatchString(lines[0]) {
+			listItem = true
+
+			frontPad := regexp.MustCompile(matcher+".*").ReplaceAllString(lines[0], "$1")
+			newPad := strings.Repeat("  ", len(frontPad))
+
+			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], "")
+			lines[0] = newPad + "  - " + lines[0]
 		}
-		descriptionFormatted = append(descriptionFormatted, "- "+l)
+
+		// Ordered list
+		matcher = `^[0-9]+\. `
+		if regexp.MustCompile(matcher).MatchString(lines[0]) {
+			listItem = true
+			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], "")
+			lines[0] = "  - " + lines[0]
+			lines = append(lines, "  logseq.order-list-type:: number")
+		}
+
+		if !listItem {
+			lines[0] = "- " + lines[0]
+		}
+
+		// Account ID
+		matcher = `<~accountid:([0-9]*:)?([^>]+)>`
+		if regexp.MustCompile(matcher).MatchString(lines[0]) {
+			accountID := regexp.MustCompile(matcher).ReplaceAllString(regexp.MustCompile(matcher).FindString(lines[0]), `$2`)
+
+			if accountID == "" {
+				log.Println("Empty accountID in line: " + lines[0])
+			}
+
+			displayName, err := FindUser(c, accountID)
+			if err != nil {
+				if c.SearchUsers {
+					log.Println(err, "Can't find user, likely an authorization error, won't bother retrying.")
+					c.SearchUsers = false
+				}
+				displayName = accountID
+			} else {
+				if c.LinkNames {
+					displayName = "[[" + displayName + "]]"
+				}
+			}
+
+			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], displayName)
+		}
+
+		descriptionFormatted = append(descriptionFormatted, lines...)
 	}
-	return descriptionFormatted
+
+	return descriptionFormatted, nil
 }
 
 func PrefixStringSlice(i []string, p string) (o []string) {
@@ -337,50 +426,242 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
 	if fullIssueCheck == nil {
 		log.Println("Fetching specific info for " + sparseIssue.Key)
-		c.apiLimited.Lock()
-		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
 
-		var resp *jira.Response
-		for {
-			retry := false
-			fullIssue, resp, err = c.client.Issue.Get(context.Background(), sparseIssue.Key, nil)
-			if err != nil {
-				retry, err = CheckAPILimit(c, resp)
-				if err != nil {
-					return nil, err
-				}
-			}
-			if !retry {
-				break
-			}
-		}
-
+		o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+			output = make([]any, 1)
+			output[0], resp, err = c.client.Issue.Get(context.Background(), a[0].(string), nil)
+			return output, resp, errors.Wrap(err, "Couldn't get issue "+a[0].(string))
+		}, []any{
+			sparseIssue.Key,
+		})
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "Failed in APIWrapper")
 		}
-		jiraApiCallCount += 1
+		fullIssue = o[0].(*jira.Issue)
+
 	} else {
 		fullIssue = fullIssueCheck
 	}
-	return fullIssue, err
+	return fullIssue, nil
+}
+
+func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
+	if len(*watchers) > 0 {
+		return nil
+	}
+
+	log.Println("Getting watchers for " + i.Key)
+	o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+		output = make([]any, 1)
+		output[0], resp, err = c.client.Issue.GetWatchers(context.Background(), a[0].(string))
+		return output, resp, errors.Wrap(err, "Couldn't get watchers for "+a[0].(string))
+	}, []any{
+		i.ID,
+	})
+	if err != nil {
+		return errors.Wrap(err, "Failed in APIWrapper")
+	}
+	watchingUsers := o[0].(*[]jira.User)
+
+	for _, u := range *watchingUsers {
+		nameText := u.DisplayName
+		if c.LinkNames {
+			nameText = "[[" + nameText + "]]"
+		}
+		*watchers = append(*watchers, nameText)
+	}
+	return nil
+}
+
+func LogseqTransform(str string) string {
+	return SearchAndReplace(str, []struct {
+		matcher string
+		repl    string
+	}{
+		{ // Replace slash with FULLWIDTH SOLIDUS to prevent hierarchy pages being made
+			matcher: `/`,
+			repl:    `／`,
+		},
+		{ // Replace [[text]] with (text)
+			matcher: `\[\[ *([^ ][^\]]+[^ ]) *\]\]`,
+			repl:    `( $1 )`,
+		},
+	})
+}
+
+func LogseqTitle(issue *jira.Issue) string {
+	return issue.Key + " | " + LogseqTransform(issue.Fields.Summary)
+}
+
+func IssueMap() error {
+	output := []string{}
+
+	for _, i := range issuesStore {
+		issues[i.Key] = i
+	}
+
+	for key, issue := range issues {
+
+		if _, ok := children[key]; !ok {
+			children[key] = []string{}
+		}
+		if issue.Fields.Parent != nil {
+			parents[key] = &issue.Fields.Parent.Key
+			children[issue.Fields.Parent.Key] = append(children[issue.Fields.Parent.Key], key)
+		} else {
+			parents[key] = nil
+		}
+	}
+
+	topLevel := []string{}
+
+	for child, parent := range parents {
+		if parent == nil {
+			topLevel = append(topLevel, child)
+		}
+	}
+
+	natsort.Sort(topLevel)
+
+	for _, target := range topLevel {
+		err := RecurseIssueMap(target, &output, 0)
+		if err != nil {
+			return errors.Wrap(err, "Recursion failed on "+target+" at depth 0")
+		}
+	}
+
+	return errors.Wrap(WritePage("Jira/Item Hierarchy", []byte(strings.Join(output, "\n"))), "Failed to write page in IssueMap")
+}
+
+func RecurseIssueMap(target string, output *([]string), depth int) error {
+	*output = append(*output, strings.Repeat("  ", depth)+"- [["+LogseqTitle(issues[target])+"]]")
+	if depth == 0 {
+		*output = append(*output, "  collapsed:: true")
+	}
+
+	targetChildren := children[target]
+	natsort.Sort(targetChildren)
+
+	for _, child := range targetChildren {
+		err := RecurseIssueMap(child, output, depth+1)
+		if err != nil {
+			return errors.Wrap(err, "Recursion failed on "+target+" at depth "+strconv.Itoa(depth))
+		}
+	}
+	return nil
+}
+
+func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i []any) (output []any, resp *jira.Response, err error) {
+	c.apiLimited.Lock()
+	c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
+	var body []byte
+	var errBody error
+	for {
+		retry := false
+		output, resp, err = f(i)
+		if resp != nil {
+			body, errBody = io.ReadAll(resp.Body)
+			if errBody != nil {
+				err = errors.Wrap(err, "Failed to read response body: "+errBody.Error())
+			}
+		} else {
+			return nil, nil, errors.Wrap(err, "No response")
+		}
+		if resp.StatusCode != 200 && resp.StatusCode != 429 {
+			return nil, nil, errors.Wrap(
+				errors.Wrap(
+					err,
+					string(body),
+				),
+				"APIWrapper failed due to status "+strconv.Itoa(resp.StatusCode))
+		}
+		if err != nil {
+			if resp == nil {
+				return nil, nil, errors.Wrap(err, "Empty response")
+			}
+			retry, err = CheckAPILimit(c, resp)
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "Failed API limit check")
+			}
+		}
+		if !retry {
+			break
+		}
+	}
+	jiraApiCallCount += 1
+	return output, resp, errors.Wrap(err, "Failed somewhere in APIWrapper")
 }
 
 func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
-	if resp.StatusCode == 429 {
+	if resp.StatusCode == 200 {
+		return false, nil
+	} else if resp.StatusCode == 429 {
 		retry = true
 		c.apiLimited.Lock()
+		defer c.apiLimited.Unlock()
 		resetTime, err := time.Parse("2006-01-02T15:04Z", resp.Response.Header.Get("X-Ratelimit-Reset"))
 		if err != nil {
-			return false, err
+			return false, errors.Wrap(err, "Failed to parse X-Ratelimit-Reset time")
 		}
 		resetTime = resetTime.Add(time.Second * 1) // Add one second buffer just in case
 		log.Println("API calls exhausted, sleeping until ", resetTime)
 		time.Sleep(time.Until(resetTime))
 		log.Println("Waking up, API should be usable again, retrying last call.")
-		c.apiLimited.Unlock()
 	} else {
-		retry = false
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return false, errors.Wrap(err, "Failed to read response body")
+		}
+		return false, errors.New(string(body))
 	}
 
 	return
+}
+
+func FindUser(c *JiraConfig, id string) (string, error) {
+	usersLock.Lock()
+	defer usersLock.Unlock()
+
+	if val, ok := users[id]; ok { // User is already present
+		return val, nil
+	}
+
+	for _, u := range config.Jira.Users {
+		if u.AccountID == id { // User is in config
+			users[id] = u.DisplayName
+			return users[id], nil
+		}
+	}
+	if !c.SearchUsers {
+		return id, errors.New("Cannot find given user")
+	}
+
+	// This has never worked for me (data protection...)
+	log.Println("Getting user for " + id)
+	o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+		output = make([]any, 1)
+		req, err := c.client.NewRequest(context.Background(), "GET", "/rest/api/3/user?accountId="+a[0].(string), nil)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "Failed to create request for /rest/api/3/user")
+		}
+
+		ret := &jira.User{}
+		resp, err = c.client.Do(req, ret)
+		if err != nil {
+			err = errors.Wrap(err, "Failed to do request for /rest/api/3/user")
+		}
+
+		return output, resp, errors.Wrap(err, "Failed to get user for id "+a[0].(string))
+	}, []any{
+		id,
+	})
+	if err != nil {
+		return "", errors.Wrap(err, "Failed to run APIWrapper")
+	}
+	foundUser := o[0].(*jira.User)
+
+	users[id] = foundUser.DisplayName
+
+	return users[id], errors.Wrap(err, "Failed somewhere in FindUser")
+
 }

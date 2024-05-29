@@ -1,6 +1,10 @@
 package main
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/pkg/errors"
+)
 
 func SearchAndReplace(
 	src string,
@@ -12,4 +16,8 @@ func SearchAndReplace(
 		src = regexp.MustCompile(l.matcher).ReplaceAllString(src, l.repl)
 	}
 	return src
+}
+
+type stackTracer interface {
+	StackTrace() errors.StackTrace
 }
