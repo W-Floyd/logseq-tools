@@ -281,7 +281,21 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 				if c.LinkNames {
 					nameText = "[[" + nameText + "]]"
 				}
-				output = append(output, "- "+nameText+" - Created: "+comment.Created+" | Updated: "+comment.Updated)
+
+				// Mon Jan 2 15:04:05 -0700 MST 2006
+				format := "2006-01-02T15:04:05.000-0700" // 2024-05-10T13:46:45.585-0500
+
+				created, err := time.Parse(format, comment.Created)
+				if err != nil {
+					return errors.Wrap(err, "Failed to get comment creation time")
+				}
+
+				updated, err := time.Parse(format, comment.Updated)
+				if err != nil {
+					return errors.Wrap(err, "Failed to get comment update time")
+				}
+
+				output = append(output, "- "+nameText+" - Created: "+DateFormat(created)+" | Updated: "+DateFormat(updated))
 
 				line, err := ParseJiraText(c, comment.Body)
 				if err != nil {

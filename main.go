@@ -9,9 +9,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
-	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
@@ -94,8 +92,4 @@ func WritePage(title string, contents []byte) error {
 	}
 
 	return os.WriteFile(outputFile, contents, 0644)
-}
-
-func DateFormat(input time.Time) string {
-	return input.Format("Jan") + " " + humanize.Ordinal(input.Day()) + ", " + input.Format("2006")
 }
