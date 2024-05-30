@@ -5,9 +5,7 @@ go 1.22.2
 require (
 	github.com/MagicalTux/natsort v0.0.0-20220626140124-f8bd634d5139
 	github.com/andygrunwald/go-jira/v2 v2.0.0-20240419124508-6752705de4c7
-	github.com/davecgh/go-spew v1.1.1
 	github.com/dustin/go-humanize v1.0.1
-	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb
 	github.com/pkg/errors v0.9.1
 	golang.org/x/sync v0.7.0
 )

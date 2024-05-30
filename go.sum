@@ -2,11 +2,8 @@ github.com/MagicalTux/natsort v0.0.0-20220626140124-f8bd634d5139 h1:lceuX8TBl3y7
 github.com/MagicalTux/natsort v0.0.0-20220626140124-f8bd634d5139/go.mod h1:HmvSKxUCrak+aeyGE8y5/RsKx5KezlpyWzP48VP6/EA=
 github.com/andygrunwald/go-jira/v2 v2.0.0-20240419124508-6752705de4c7 h1:FYIM+f7fL+ji6i+wo8jmP1jS4cSnGjBQ2HAzmXL/BkM=
 github.com/andygrunwald/go-jira/v2 v2.0.0-20240419124508-6752705de4c7/go.mod h1:ZqySL3V+2YaH61NHTM9ZDOLpAXvS2KgbxCmVXOBpwv0=
-github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
-github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
-github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb/go.mod h1:bH6Xx7IW64qjjJq8M2u4dxNaBiDfKK+z/3eGDpXEQhc=
 github.com/fatih/structs v1.1.0 h1:Q7juDM0QtcnhCpeyLGQKyg4TOIghuNXrkL32pHAUMxo=
 github.com/fatih/structs v1.1.0/go.mod h1:9NiDSp5zOcgEDl+j00MP/WkGVPOlPRLejGD8Ga6PJ7M=
 github.com/golang-jwt/jwt/v4 v4.5.0 h1:7cYmW1XlMY7h7ii7UhUyChSgS5wUJEnm9uZVTGqOWzg=
