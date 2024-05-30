@@ -567,7 +567,7 @@ func RecurseIssueMap(target string, output *([]string), depth int) error {
 
 func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i []any) (output []any, resp *jira.Response, err error) {
 	c.apiLimited.Lock()
-	c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still rick of race condition, but lessened
+	c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still risk of race condition, but lessened
 	var body []byte
 	var errBody error
 	for {
