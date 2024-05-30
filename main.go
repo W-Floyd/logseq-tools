@@ -49,8 +49,6 @@ func main() {
 	ctx := context.Background()
 	errs, _ := errgroup.WithContext(ctx)
 
-	errs.SetLimit(8)
-
 	for _, instance := range config.Jira.Instances {
 		if instance.Enabled {
 			instance := instance

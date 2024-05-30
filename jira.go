@@ -23,6 +23,7 @@ type JiraConfig struct {
 		BaseURL  string `json:"base_url"`
 		Username string `json:"username"`
 		APIToken string `json:"api_token"`
+		Parallel *int   `json:"parallel"`
 	} `json:"connection"`
 	Projects         []string `json:"projects"`           // XXXXX string identifier of projects to process
 	Enabled          bool     `json:"enabled"`            // Whether to process this Jira instance
@@ -83,6 +84,11 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 	ctx := context.Background()
 	errs, _ := errgroup.WithContext(ctx)
+	if c.Connection.Parallel != nil {
+		errs.SetLimit(*c.Connection.Parallel)
+	} else {
+		errs.SetLimit(4)
+	}
 
 	log.Println("Processing Project: " + project)
 
@@ -566,11 +572,11 @@ func RecurseIssueMap(target string, output *([]string), depth int) error {
 }
 
 func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i []any) (output []any, resp *jira.Response, err error) {
-	c.apiLimited.Lock()
-	c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still risk of race condition, but lessened
 	var body []byte
 	var errBody error
 	for {
+		c.apiLimited.Lock()
+		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still risk of race condition, but lessened
 		retry := false
 		output, resp, err = f(i)
 		if resp != nil {
