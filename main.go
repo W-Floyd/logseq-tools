@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path"
 	"regexp"
 	"strconv"
 
+	"github.com/IceflowRE/go-multiprogressbar"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
@@ -28,9 +30,16 @@ type Config struct {
 var (
 	config           = Config{}
 	jiraApiCallCount = 0
+	progress         *multiprogressbar.MultiProgressBar
 )
 
+func init() {
+	progress = multiprogressbar.New()
+}
+
 func main() {
+
+	slog.SetLogLoggerLevel(slog.LevelWarn)
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
@@ -38,12 +47,12 @@ func main() {
 
 	configRaw, err := os.ReadFile(configFile)
 	if err != nil {
-		log.Fatalln(err)
+		slog.Error(err.Error())
 	}
 
 	err = json.Unmarshal(configRaw, &config)
 	if err != nil {
-		log.Fatalln(err)
+		slog.Error(err.Error())
 	}
 
 	ctx := context.Background()
@@ -64,7 +73,7 @@ func main() {
 
 	if jiraApiCallCount > 0 {
 		IssueMap()
-		log.Println("Jira API calls: " + strconv.Itoa(jiraApiCallCount))
+		slog.Info("Jira API calls: " + strconv.Itoa(jiraApiCallCount))
 	}
 
 	if err != nil {
@@ -73,7 +82,7 @@ func main() {
 				fmt.Printf("%+s:%d\n", f, f)
 			}
 		}
-		log.Fatalln(err)
+		slog.Error(err.Error())
 	}
 
 }
@@ -82,7 +91,7 @@ func WritePage(title string, contents []byte) error {
 
 	outputFile := path.Join(config.LogseqRoot, "pages", PageNameToFileName(title)+".md")
 
-	log.Println("Attempting to create file: " + outputFile)
+	slog.Info("Attempting to create file: " + outputFile)
 
 	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(outputFile, "")
 

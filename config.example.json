@@ -17,10 +17,12 @@
                     "api_token": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
                     "parallel": 8
                 },
-                "done_status": [
-                    "Done",
-                    "Past"
-                ],
+                "status": {
+                    "done": [
+                        "Done",
+                        "Past"
+                    ]
+                },
                 "projects": [
                     "XXXXX",
                     "XXXXX"

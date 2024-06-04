@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"log"
 	"regexp"
 	"slices"
 	"sort"
@@ -12,9 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
+	"github.com/k0kubun/go-ansi"
 	"github.com/pkg/errors"
+	"github.com/schollz/progressbar/v3"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -32,9 +35,11 @@ type JiraConfig struct {
 	ExcludeFromGraph bool     `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
 	IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
 	IncludeTask      bool     `json:"include_task"`       // Whether to include a task on each item with a due date
-	DoneStatus       []string `json:"done_status"`        // Names to consider as done
-	LinkNames        bool     `json:"link_names"`         // Whether to [[link]] names
-	SearchUsers      bool     `json:"search_users"`       // Whether to search users - may not be possible due to permissions
+	Status           struct {
+		Done []string `json:"done"` // Names to consider as done
+	} `json:"status"`
+	LinkNames   bool `json:"link_names"`   // Whether to [[link]] names
+	SearchUsers bool `json:"search_users"` // Whether to search users - may not be possible due to permissions
 
 	Actions struct {
 		WatchAll struct {
@@ -48,6 +53,7 @@ type JiraConfig struct {
 
 	apiLimited *sync.Mutex  // Lock this to prevent calls while API cools down, unlock once done
 	client     *jira.Client // Client to use for communication
+	progress   *progressbar.ProgressBar
 }
 
 var (
@@ -90,12 +96,28 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 		errs.SetLimit(4)
 	}
 
-	log.Println("Processing Project: " + project)
+	slog.Info("Processing Project: " + project)
 
 	issues, err := GetIssues(c, "project = "+project)
 	if err != nil {
 		return errors.Wrap(err, "Couldn't get issues for project "+project)
 	}
+
+	c.progress = progressbar.NewOptions(len(issues),
+		progressbar.OptionSetWriter(ansi.NewAnsiStdout()), //you should install "github.com/k0kubun/go-ansi"
+		progressbar.OptionEnableColorCodes(true),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(15),
+		progressbar.OptionSetDescription("["+project+"]"),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "[green]=[reset]",
+			SaucerHead:    "[green]>[reset]",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}))
+
+	progress.Add(c.progress)
 
 	for _, issue := range issues {
 		issue := issue
@@ -138,7 +160,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		}
 
 		if !watching {
-			log.Println("Not watching " + issue.Key + ", adding " + c.Actions.WatchAll.DisplayName + " as a watcher now")
+			slog.Info("Not watching " + issue.Key + ", adding " + c.Actions.WatchAll.DisplayName + " as a watcher now")
 
 			_, _, err = APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
 				resp, err = c.client.Issue.AddWatcher(context.Background(), a[0].(string), a[1].(string))
@@ -160,7 +182,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	}
 
 	if !c.IncludeDone && func() bool {
-		for _, n := range c.DoneStatus {
+		for _, n := range c.Status.Done {
 			if issue.Fields.Status.Name == n {
 				return true
 			}
@@ -170,7 +192,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		return nil
 	}
 
-	log.Println("Processing Issue: " + issue.Key)
+	slog.Info("Processing Issue: " + issue.Key)
 
 	output := []string{
 		"alias:: " + issue.Key,
@@ -181,6 +203,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		"url:: " + c.Connection.BaseURL + "browse/" + issue.Key,
 		"description:: " + LogseqTransform(issue.Fields.Summary),
 		"status:: " + issue.Fields.Status.Name,
+		"status-simple:: " + SimplifyStatus(c, issue),
 		"date-created:: [[" + DateFormat(time.Time(issue.Fields.Created)) + "]]",
 		"date-created-sortable:: " + time.Time(issue.Fields.Created).Format("20060102"),
 	}
@@ -263,13 +286,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	if c.IncludeTask && time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
 		output = append(output,
 			"- ***",
-			"- "+func() string {
-				switch issue.Fields.Status.Name {
-				case "Done", "Past":
-					return "DONE"
-				}
-				return "TODO"
-			}()+" [[Jira Task]] [["+issue.Key+"]]",
+			"- "+SimplifyStatus(c, issue)+" [[Jira Task]] [["+issue.Key+"]]",
 			"  DEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
 			"  SCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
 		)
@@ -320,8 +337,23 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		issuesStore = append(issuesStore, issue)
 	}
 
-	return WritePage(issue.Key, []byte(strings.Join(output, "\n")))
+	err = WritePage(issue.Key, []byte(strings.Join(output, "\n")))
 
+	if err == nil {
+		c.progress.Add(1)
+	}
+
+	return err
+
+}
+
+func SimplifyStatus(c *JiraConfig, i *jira.Issue) string {
+	for _, status := range c.Status.Done {
+		if i.Fields.Status.Name == status {
+			return "DONE"
+		}
+	}
+	return "TODO"
 }
 
 func (c *JiraConfig) createClient() (*jira.Client, error) {
@@ -411,13 +443,13 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 			accountID := regexp.MustCompile(matcher).ReplaceAllString(regexp.MustCompile(matcher).FindString(lines[0]), `$2`)
 
 			if accountID == "" {
-				log.Println("Empty accountID in line: " + lines[0])
+				slog.Info("Empty accountID in line: " + lines[0])
 			}
 
 			displayName, err := FindUser(c, accountID)
 			if err != nil {
 				if c.SearchUsers {
-					log.Println(err, "Can't find user, likely an authorization error, won't bother retrying.")
+					slog.Info(err.Error(), "Can't find user, likely an authorization error, won't bother retrying.")
 					c.SearchUsers = false
 				}
 				displayName = accountID
@@ -445,7 +477,7 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 
 func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
 	if fullIssueCheck == nil {
-		log.Println("Fetching specific info for " + sparseIssue.Key)
+		slog.Info("Fetching specific info for " + sparseIssue.Key)
 
 		o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
 			output = make([]any, 1)
@@ -470,7 +502,7 @@ func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
 		return nil
 	}
 
-	log.Println("Getting watchers for " + i.Key)
+	slog.Info("Getting watchers for " + i.Key)
 	o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
 		output = make([]any, 1)
 		output[0], resp, err = c.client.Issue.GetWatchers(context.Background(), a[0].(string))
@@ -624,9 +656,9 @@ func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
 			return false, errors.Wrap(err, "Failed to parse X-Ratelimit-Reset time")
 		}
 		resetTime = resetTime.Add(time.Second * 1) // Add one second buffer just in case
-		log.Println("API calls exhausted, sleeping until ", resetTime)
+		slog.Info("API calls exhausted, sleeping until ", resetTime)
 		time.Sleep(time.Until(resetTime))
-		log.Println("Waking up, API should be usable again, retrying last call.")
+		slog.Info("Waking up, API should be usable again, retrying last call.")
 	} else {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -657,7 +689,7 @@ func FindUser(c *JiraConfig, id string) (string, error) {
 	}
 
 	// This has never worked for me (data protection...)
-	log.Println("Getting user for " + id)
+	slog.Info("Getting user for " + id)
 	o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
 		output = make([]any, 1)
 		req, err := c.client.NewRequest(context.Background(), "GET", "/rest/api/3/user?accountId="+a[0].(string), nil)
