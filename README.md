@@ -45,11 +45,38 @@ It is recommended to have the following settings to prevent Logseq slowdowns whe
 [?p :block/properties ?properties]
 [(get ?properties :date-due-sortable) ?datedue]
 (page-property ?p :type  "jira-ticket")
-[(get ?properties :status) ?status]
-(not [(contains? #{"Done" "Past"} ?status)])
+(not (page-property ?p :status-simple "DONE"))
 [(< ?datedue ?end)]
  ]
 :inputs [:today]
 }
 #+END_QUERY
+```
+
+### Due <= 7 days
+
+```clojure
+#+BEGIN_QUERY
+{
+:query [:find (pull ?p [*])
+:in $ ?end
+:where
+[?p :block/properties ?properties]
+[(get ?properties :date-due-sortable) ?datedue]
+(page-property ?p :type  "jira-ticket")
+(not (page-property ?p :status-simple "DONE"))
+[(< ?datedue ?end)]
+ ]
+:inputs [:+7d]
+}
+#+END_QUERY
+```
+
+### Unassigned
+
+Customize (or remove) the `jira-type` according to your own format.
+
+```clojure
+query-table:: true
+{{query (and (property :type "jira-ticket") (not (property :assignee)) (or (property :jira-type "Work-Item of Any Size") (property :jira-type "Objective-Based Work-Item with Duration of Days or Weeks") (property :jira-type "Fine-Grain Work-Item")) (not (property :status-simple "DONE")))}}
 ```
