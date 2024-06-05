@@ -11,8 +11,9 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/IceflowRE/go-multiprogressbar"
+	"github.com/fatih/color"
 	"github.com/pkg/errors"
+	"github.com/vbauerster/mpb/v8"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -30,11 +31,15 @@ type Config struct {
 var (
 	config           = Config{}
 	jiraApiCallCount = 0
-	progress         *multiprogressbar.MultiProgressBar
+	progress         *mpb.Progress
+	red, green       = color.New(color.FgRed), color.New(color.FgGreen)
 )
 
 func init() {
-	progress = multiprogressbar.New()
+	progress = mpb.New(
+		mpb.WithOutput(color.Output),
+		mpb.WithAutoRefresh(),
+	)
 }
 
 func main() {

@@ -15,9 +15,9 @@ import (
 
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
-	"github.com/k0kubun/go-ansi"
 	"github.com/pkg/errors"
-	"github.com/schollz/progressbar/v3"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -53,7 +53,7 @@ type JiraConfig struct {
 
 	apiLimited *sync.Mutex  // Lock this to prevent calls while API cools down, unlock once done
 	client     *jira.Client // Client to use for communication
-	progress   *progressbar.ProgressBar
+	progress   map[string]*mpb.Bar
 }
 
 var (
@@ -74,6 +74,25 @@ func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 		return errors.Wrap(err, "Couldn't create a client")
 	}
 
+	c.progress = make(map[string]*mpb.Bar)
+
+	for _, project := range c.Projects {
+
+		pbar := progress.AddBar(0,
+			mpb.PrependDecorators(
+				decor.Name(project, decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+				decor.Name("processing", decor.WCSyncSpaceR),
+				decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
+			),
+			mpb.AppendDecorators(
+				decor.OnComplete(decor.Percentage(decor.WC{W: 5}), "done"),
+			),
+		)
+
+		c.progress[project] = pbar
+
+	}
+
 	for _, project := range c.Projects {
 
 		err = ProcessProject(wg, c, project)
@@ -88,8 +107,7 @@ func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
 func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
-	ctx := context.Background()
-	errs, _ := errgroup.WithContext(ctx)
+	errs, _ := errgroup.WithContext(context.Background())
 	if c.Connection.Parallel != nil {
 		errs.SetLimit(*c.Connection.Parallel)
 	} else {
@@ -103,21 +121,7 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 		return errors.Wrap(err, "Couldn't get issues for project "+project)
 	}
 
-	c.progress = progressbar.NewOptions(len(issues),
-		progressbar.OptionSetWriter(ansi.NewAnsiStdout()), //you should install "github.com/k0kubun/go-ansi"
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(15),
-		progressbar.OptionSetDescription("["+project+"]"),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
-
-	progress.Add(c.progress)
+	c.progress[project].SetTotal(int64(len(issues)), false)
 
 	for _, issue := range issues {
 		issue := issue
@@ -340,7 +344,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	err = WritePage(issue.Key, []byte(strings.Join(output, "\n")))
 
 	if err == nil {
-		c.progress.Add(1)
+		c.progress[project].IncrBy(1)
 	}
 
 	return err
