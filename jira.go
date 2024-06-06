@@ -412,6 +412,13 @@ func GetIssues(c *JiraConfig, searchString string) (issues []jira.Issue, err err
 }
 
 func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
+
+	// Useful for debugging original content vs J2M output.
+	// h1 := fnv1a.HashString64(input)
+
+	// WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".original", []byte(input))
+	// WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".formatted", []byte(JiraToMD(input)))
+
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}
 
@@ -437,12 +444,17 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 		}
 
 		// Ordered list
-		matcher = `^[0-9]+\. `
+		matcher = `^( *)[0-9]+\.( |\) )`
 		if regexp.MustCompile(matcher).MatchString(lines[0]) {
 			listItem = true
+
+			frontPad := regexp.MustCompile(matcher+".*").ReplaceAllString(lines[0], "$1")
+			newPad := strings.Repeat(" ", len(frontPad))
+
 			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], "")
-			lines[0] = "  - " + lines[0]
-			lines = append(lines, "  logseq.order-list-type:: number")
+			lines[0] = newPad + "  - " + lines[0]
+
+			lines = append(lines, newPad+"    logseq.order-list-type:: number")
 		}
 
 		if !listItem {
@@ -450,28 +462,34 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 		}
 
 		// Account ID
-		matcher = `<~accountid:([0-9]*:)?([^>]+)>`
+		matcher = `<~accountid:([0-9]*:|)([^>]+)>`
 		if regexp.MustCompile(matcher).MatchString(lines[0]) {
-			accountID := regexp.MustCompile(matcher).ReplaceAllString(regexp.MustCompile(matcher).FindString(lines[0]), `$2`)
 
-			if accountID == "" {
-				slog.Info("Empty accountID in line: " + lines[0])
-			}
+			accountIDs := regexp.MustCompile(matcher).FindAllString(lines[0], -1)
 
-			displayName, err := FindUser(c, accountID)
-			if err != nil {
-				if c.SearchUsers {
-					slog.Info(err.Error(), "Can't find user, likely an authorization error, won't bother retrying.")
-					c.SearchUsers = false
+			for _, rawAccountID := range accountIDs {
+
+				accountID := regexp.MustCompile(matcher).ReplaceAllString(rawAccountID, `$2`)
+
+				if accountID == "" {
+					slog.Info("Empty accountID in line: " + lines[0])
 				}
-				displayName = accountID
-			} else {
-				if c.LinkNames {
-					displayName = "[[" + displayName + "]]"
-				}
-			}
 
-			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], displayName)
+				displayName, err := FindUser(c, accountID)
+				if err != nil {
+					if c.SearchUsers {
+						slog.Info(err.Error(), "Can't find user, likely an authorization error, won't bother retrying.")
+						c.SearchUsers = false
+					}
+					displayName = accountID
+				} else {
+					if c.LinkNames {
+						displayName = "[[" + displayName + "]]"
+					}
+				}
+
+				lines[0] = strings.Replace(lines[0], rawAccountID, displayName, 1)
+			}
 		}
 
 		descriptionFormatted = append(descriptionFormatted, lines...)

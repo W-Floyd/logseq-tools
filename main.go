@@ -94,16 +94,20 @@ func main() {
 
 func WritePage(title string, contents []byte) error {
 
-	outputFile := path.Join(config.LogseqRoot, "pages", PageNameToFileName(title)+".md")
+	return WriteFile(path.Join(config.LogseqRoot, "pages", PageNameToFileName(title)+".md"), contents)
 
-	slog.Info("Attempting to create file: " + outputFile)
+}
 
-	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(outputFile, "")
+func WriteFile(path string, contents []byte) error {
+
+	slog.Info("Attempting to create file: " + path)
+
+	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(path, "")
 
 	err := os.MkdirAll(dir, os.ModeDir)
 	if err != nil {
 		return errors.Wrap(err, "Couldn't make directory "+dir)
 	}
 
-	return os.WriteFile(outputFile, contents, 0644)
+	return os.WriteFile(path, contents, 0644)
 }

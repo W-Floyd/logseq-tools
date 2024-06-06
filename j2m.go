@@ -71,8 +71,8 @@ func JiraToMD(str string) string {
 			repl: "<sup>$1</sup>",
 		},
 		{ // Subscript
-			re:   regexp.MustCompile(`~([^~]*)~`),
-			repl: "<sub>$1</sub>",
+			re:   regexp.MustCompile(`([^\[]|^)~([^~]*)~`),
+			repl: "$1<sub>$2</sub>",
 		},
 		{ // Strikethrough
 			re:   regexp.MustCompile(`(\s+)-(\S+.*?\S)-(\s+)`),
@@ -91,7 +91,7 @@ func JiraToMD(str string) string {
 			repl: "```",
 		},
 		{ // Un-named Links
-			re:   regexp.MustCompile(`(?U)\[([^|]+?)\]`),
+			re:   regexp.MustCompile(`(?U)\[([^|\]]+?)\]`),
 			repl: "<$1>",
 		},
 		{ // Images
@@ -128,6 +128,10 @@ func JiraToMD(str string) string {
 		{ // remove leading-space of table headers and rows
 			re:   regexp.MustCompile(`(?m)^[ \t]*\|`),
 			repl: "|",
+		},
+		{
+			re:   regexp.MustCompile(`\$`),
+			repl: `\$`,
 		},
 	}
 	for _, jiration := range jirations {
