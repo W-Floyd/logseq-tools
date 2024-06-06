@@ -9,11 +9,13 @@
                 "exclude_from_graph": true,
                 "include_done": true,
                 "include_task": false,
+                "include_my_tasks": true,
                 "link_names": false,
                 "search_users": false,
-                "connection":{
+                "connection": {
                     "base_url": "https://mycompany.atlassian.net/",
                     "username": "username@email.com",
+                    "display_name": "your display name",
                     "api_token": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
                     "parallel": 8
                 },
@@ -30,7 +32,7 @@
                 "actions": {
                     "watch_all": {
                         "enabled": false,
-                        "display_name": "your display name"
+                        "display_name": "a display name"
                     }
                 }
             }

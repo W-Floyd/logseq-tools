@@ -23,10 +23,11 @@ import (
 
 type JiraConfig struct {
 	Connection struct {
-		BaseURL  string `json:"base_url"`
-		Username string `json:"username"`
-		APIToken string `json:"api_token"`
-		Parallel *int   `json:"parallel"`
+		BaseURL     string `json:"base_url"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		APIToken    string `json:"api_token"`
+		Parallel    *int   `json:"parallel"`
 	} `json:"connection"`
 	Projects         []string `json:"projects"`           // XXXXX string identifier of projects to process
 	Enabled          bool     `json:"enabled"`            // Whether to process this Jira instance
@@ -35,6 +36,7 @@ type JiraConfig struct {
 	ExcludeFromGraph bool     `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
 	IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
 	IncludeTask      bool     `json:"include_task"`       // Whether to include a task on each item with a due date
+	IncludeMyTasks   bool     `json:"include_my_tasks"`   // Whether to include a my tasks in all cases
 	Status           struct {
 		Done []string `json:"done"` // Names to consider as done
 	} `json:"status"`
@@ -287,13 +289,19 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 
 	}
 
-	if c.IncludeTask && time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
+	if (c.IncludeTask &&
+		time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1) ||
+		(c.IncludeMyTasks &&
+			issue.Fields.Assignee != nil &&
+			issue.Fields.Assignee.DisplayName == c.Connection.DisplayName) {
 		output = append(output,
 			"- ***",
-			"- "+SimplifyStatus(c, issue)+" [[Jira Task]] [["+issue.Key+"]]",
-			"  DEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
-			"  SCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
-		)
+			"- "+SimplifyStatus(c, issue)+" [[Jira Task]] [["+issue.Key+"]]")
+		if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
+			output = append(output, "  DEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
+				"  SCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
+			)
+		}
 	}
 
 	if c.IncludeComments {
