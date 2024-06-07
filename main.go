@@ -32,7 +32,6 @@ var (
 	config           = Config{}
 	jiraApiCallCount = 0
 	progress         *mpb.Progress
-	red, green       = color.New(color.FgRed), color.New(color.FgGreen)
 )
 
 func init() {
