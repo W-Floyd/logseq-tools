@@ -309,7 +309,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue")
 		}
-		if fetchedIssue.Fields.Comments != nil {
+		if fetchedIssue.Fields.Comments != nil && len(fetchedIssue.Fields.Comments.Comments) > 0 {
 			output = append(output, "- ### Comments")
 			for _, comment := range fetchedIssue.Fields.Comments.Comments {
 				nameText := comment.Author.DisplayName
