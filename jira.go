@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"regexp"
 	"slices"
@@ -478,7 +479,7 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 				displayName, err := FindUser(c, accountID)
 				if err != nil {
 					if c.SearchUsers {
-						slog.Info(err.Error(), "Can't find user, likely an authorization error, won't bother retrying.")
+						slog.Info(err.Error() + " - Can't find user, likely an authorization error, won't bother retrying.")
 						c.SearchUsers = false
 					}
 					displayName = accountID
@@ -685,8 +686,8 @@ func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
 		if err != nil {
 			return false, errors.Wrap(err, "Failed to parse X-Ratelimit-Reset time")
 		}
-		resetTime = resetTime.Add(time.Second * 1) // Add one second buffer just in case
-		slog.Info("API calls exhausted, sleeping until ", resetTime)
+		resetTime = resetTime.Add(time.Second) // Add one second buffer just in case
+		slog.Info("API calls exhausted, sleeping until " + fmt.Sprint(resetTime))
 		time.Sleep(time.Until(resetTime))
 		slog.Info("Waking up, API should be usable again, retrying last call.")
 	} else {
