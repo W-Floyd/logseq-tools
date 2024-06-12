@@ -659,9 +659,6 @@ func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i [
 				"APIWrapper failed due to status "+strconv.Itoa(resp.StatusCode))
 		}
 		if err != nil {
-			if resp == nil {
-				return nil, nil, errors.Wrap(err, "Empty response")
-			}
 			retry, err = CheckAPILimit(c, resp)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "Failed API limit check")
