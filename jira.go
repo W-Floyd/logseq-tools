@@ -38,6 +38,7 @@ type JiraConfig struct {
 	IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
 	IncludeTask      bool     `json:"include_task"`       // Whether to include a task on each item with a due date
 	IncludeMyTasks   bool     `json:"include_my_tasks"`   // Whether to include a my tasks in all cases
+	StartDateField   string   `json:"start_date_field"`   // Custom field to use for start dates
 	Status           struct {
 		Done []string `json:"done"` // Names to consider as done
 	} `json:"status"`
@@ -119,7 +120,14 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 	slog.Info("Processing Project: " + project)
 
-	issues, err := GetIssues(c, "project = "+project)
+	var issues []jira.Issue
+	var err error
+
+	if *calendar {
+		issues, err = GetIssues(c, "project = "+project+` AND comment ~ 'ExtractTag'`)
+	} else {
+		issues, err = GetIssues(c, "project = "+project)
+	}
 	if err != nil {
 		return errors.Wrap(err, "Couldn't get issues for project "+project)
 	}
@@ -128,10 +136,17 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 	for _, issue := range issues {
 		issue := issue
-		errs.Go(func() error {
-			err := ProcessIssue(wg, c, &issue, project)
-			return errors.Wrap(err, "Failed to ProcessIssue "+issue.Key)
-		})
+		if *calendar {
+			errs.Go(func() error {
+				err := ProcessCalendar(wg, c, &issue, project)
+				return errors.Wrap(err, "Failed to ProcessCalendar "+issue.Key)
+			})
+		} else {
+			errs.Go(func() error {
+				err := ProcessIssue(wg, c, &issue, project)
+				return errors.Wrap(err, "Failed to ProcessIssue "+issue.Key)
+			})
+		}
 	}
 
 	return errors.Wrap(errs.Wait(), "Goroutine failed from ProcessProject")

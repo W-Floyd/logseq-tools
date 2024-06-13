@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"log/slog"
@@ -10,9 +11,11 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
+	"github.com/tj/go-naturaldate"
 	"github.com/vbauerster/mpb/v8"
 	"golang.org/x/sync/errgroup"
 )
@@ -29,9 +32,13 @@ type Config struct {
 }
 
 var (
-	config           = Config{}
-	jiraApiCallCount = 0
-	progress         *mpb.Progress
+	config                = Config{}
+	jiraApiCallCount      = 0
+	progress              *mpb.Progress
+	calendar              *bool
+	calendarPath          *string
+	calendarLookahead     *string
+	calendarLookaheadTime *time.Time
 )
 
 func init() {
@@ -45,11 +52,32 @@ func main() {
 
 	slog.SetLogLoggerLevel(slog.LevelWarn)
 
+	var err error
+
+	configFile := flag.String("config-path", "./config.json", "Config file to use")
+	// LogseqRoot:=
+
+	calendar = flag.Bool("calendar", false, "Whether to just parse calendar tags (into Markwhen)")
+	calendarPath = flag.String("calendar-path", "./calendar.mw", "Where to parse the calendar to")
+	calendarLookahead = flag.String("calendar-lookahead", "", "How far to look ahead")
+
+	flag.Parse()
+
+	if *calendar && calendarLookahead != nil && *calendarLookahead != "" {
+		now := time.Now()
+		t, err := naturaldate.Parse(*calendarLookahead, now)
+		if err != nil {
+			slog.Error(err.Error())
+		}
+		if t == now {
+			slog.Error("Unrecognized natural date string")
+		}
+		calendarLookaheadTime = &t
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	configFile := "./config.json"
-
-	configRaw, err := os.ReadFile(configFile)
+	configRaw, err := os.ReadFile(*configFile)
 	if err != nil {
 		slog.Error(err.Error())
 	}
@@ -88,6 +116,14 @@ func main() {
 		}
 		slog.Error(err.Error())
 	}
+
+	err = WriteCalendar()
+
+	if err != nil {
+		slog.Error("Failed in WriteCalendar", err)
+	}
+
+	slog.Info("exiting")
 
 }
 
