@@ -23,6 +23,18 @@ var (
 // JiraToMD takes a string in Jira Markdown, and outputs Github Markdown
 func JiraToMD(str string) string {
 	jirations := []jiration{
+		{ // Colored text
+			re:   regexp.MustCompile("{color:([^}]+)}(.*?){color}"),
+			repl: "<span style='color: $1'>$2</span>",
+		},
+		{ // Bold styled colored text
+			re:   regexp.MustCompile(`<span style='([^']+)'>(\s)*\*(.*?)\*(\s)*<\/span>`),
+			repl: "$2<b style='$1'>$3</b>$4",
+		},
+		{ // Empty color blocks
+			re:   regexp.MustCompile(`<(span|b) style='[^']+'>(\s)*<\/(span|b)>`),
+			repl: "$2",
+		},
 		{ // UnOrdered Lists
 			re: regexp.MustCompile(`(?m)^[ \t]*(\*+)\s+`),
 			repl: func(groups []string) string {

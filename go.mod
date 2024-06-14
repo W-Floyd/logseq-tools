@@ -9,6 +9,7 @@ require (
 	github.com/fatih/color v1.17.0
 	github.com/lucasb-eyer/go-colorful v1.2.0
 	github.com/pkg/errors v0.9.1
+	github.com/segmentio/fasthash v1.0.3
 	github.com/tj/go-naturaldate v1.3.0
 	github.com/vbauerster/mpb/v8 v8.7.3
 	golang.org/x/sync v0.7.0
