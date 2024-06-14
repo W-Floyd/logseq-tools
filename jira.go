@@ -299,7 +299,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 			issues := links[linkType]
 			output = append(output, "- # "+linkType)
 			for _, issue := range issues {
-				output = append(output, "    - [["+issue+"]]")
+				output = append(output, "\t- [["+issue+"]]")
 			}
 		}
 
@@ -314,8 +314,8 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 			"- ***",
 			"- "+SimplifyStatus(c, issue)+" [[Jira Task]] [["+issue.Key+"]]")
 		if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
-			output = append(output, "  DEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
-				"  SCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
+			output = append(output, "\tDEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
+				"\tSCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
 			)
 		}
 	}
@@ -353,7 +353,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 					return errors.Wrap(err, "Failed in ParseJiraText")
 				}
 
-				output = append(output, PrefixStringSlice(line, "  ")...)
+				output = append(output, PrefixStringSlice(line, "\t")...)
 				output = append(output, "***")
 			}
 		}
@@ -453,10 +453,10 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 			listItem = true
 
 			frontPad := regexp.MustCompile(matcher+".*").ReplaceAllString(lines[0], "$1")
-			newPad := strings.Repeat("  ", len(frontPad))
+			newPad := strings.Repeat("\t", len(frontPad))
 
 			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], "")
-			lines[0] = newPad + "  - " + lines[0]
+			lines[0] = newPad + "\t- " + lines[0]
 		}
 
 		// Ordered list
@@ -465,12 +465,12 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 			listItem = true
 
 			frontPad := regexp.MustCompile(matcher+".*").ReplaceAllString(lines[0], "$1")
-			newPad := strings.Repeat(" ", len(frontPad))
+			newPad := strings.Repeat("\t", len(frontPad)/2)
 
 			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], "")
-			lines[0] = newPad + "  - " + lines[0]
+			lines[0] = newPad + "\t- " + lines[0]
 
-			lines = append(lines, newPad+"    logseq.order-list-type:: number")
+			lines = append(lines, newPad+"\tlogseq.order-list-type:: number")
 		}
 
 		if !listItem {
@@ -632,7 +632,7 @@ func IssueMap() error {
 }
 
 func RecurseIssueMap(target string, output *([]string), depth int) error {
-	*output = append(*output, strings.Repeat("  ", depth)+"- [["+LogseqTitle(issues[target])+"]]")
+	*output = append(*output, strings.Repeat("\t", depth)+"- [["+LogseqTitle(issues[target])+"]]")
 	if depth == 0 {
 		*output = append(*output, "  collapsed:: true")
 	}
