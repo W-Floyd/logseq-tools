@@ -17,6 +17,7 @@ import (
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/pkg/errors"
+	"github.com/segmentio/fasthash/fnv1a"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"golang.org/x/sync/errgroup"
@@ -429,11 +430,13 @@ func GetIssues(c *JiraConfig, searchString string) (issues []jira.Issue, err err
 
 func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 
-	// Useful for debugging original content vs J2M output.
-	// h1 := fnv1a.HashString64(input)
+	if *debug {
+		// Useful for debugging original content vs J2M output.
+		h1 := fnv1a.HashString64(input)
 
-	// WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".original", []byte(input))
-	// WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".formatted", []byte(JiraToMD(input)))
+		WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".original", []byte(input))
+		WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".formatted", []byte(JiraToMD(input)))
+	}
 
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}

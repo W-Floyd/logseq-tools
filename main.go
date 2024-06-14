@@ -39,6 +39,7 @@ var (
 	calendarPath          *string
 	calendarLookahead     *string
 	calendarLookaheadTime *time.Time
+	debug                 *bool
 )
 
 func init() {
@@ -60,6 +61,7 @@ func main() {
 	calendar = flag.Bool("calendar", false, "Whether to just parse calendar tags (into Markwhen)")
 	calendarPath = flag.String("calendar-path", "./calendar.mw", "Where to parse the calendar to")
 	calendarLookahead = flag.String("calendar-lookahead", "", "How far to look ahead")
+	debug = flag.Bool("debug", false, "Whether to create debug files")
 
 	flag.Parse()
 
