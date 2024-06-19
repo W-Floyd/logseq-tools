@@ -47,10 +47,6 @@ type JiraConfig struct {
 	SearchUsers bool `json:"search_users"` // Whether to search users - may not be possible due to permissions
 
 	Actions struct {
-		WatchAll struct {
-			Enabled     bool   `json:"enabled"`
-			DisplayName string `json:"display_name"`
-		} `json:"watch_all"`
 	} `json:"actions"`
 
 	// TODO - Implement
@@ -163,46 +159,6 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	// if err!=nil{
 	//   return nil
 	// }
-
-	// TODO - Fix watching issues, doesn't work last I knew
-	c.Actions.WatchAll.Enabled = false
-
-	if c.Actions.WatchAll.Enabled {
-
-		watching := false
-
-		err = GetWatchers(c, issue, watchers)
-		if err != nil {
-			return errors.Wrap(err, "Couldn't get watchers for "+issue.Key)
-		}
-
-		for _, w := range *watchers {
-			if w == c.Actions.WatchAll.DisplayName {
-				watching = true
-			}
-		}
-
-		if !watching {
-			slog.Info("Not watching " + issue.Key + ", adding " + c.Actions.WatchAll.DisplayName + " as a watcher now")
-
-			_, _, err = APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
-				resp, err = c.client.Issue.AddWatcher(context.Background(), a[0].(string), a[1].(string))
-				if err != nil {
-					return output, resp, errors.Wrap(err, "Failed adding watcher "+a[1].(string)+" to "+a[0].(string))
-				}
-				err = resp.Body.Close()
-				return output, resp, errors.Wrap(err, "Failed to close response body when adding watcher "+a[1].(string)+" to "+a[0].(string))
-			}, []any{
-				issue.ID,
-				c.Connection.Username,
-			})
-			if err != nil {
-				return errors.Wrap(err, "Failed in APIWrapper")
-			}
-			*watchers = append(*watchers, c.Actions.WatchAll.DisplayName)
-		}
-
-	}
 
 	if !c.IncludeDone && func() bool {
 		for _, n := range c.Status.Done {
