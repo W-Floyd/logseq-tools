@@ -23,6 +23,14 @@ var (
 // JiraToMD takes a string in Jira Markdown, and outputs Github Markdown
 func JiraToMD(str string) string {
 	jirations := []jiration{
+		{ // Opening/Closing single quotes
+			re:   regexp.MustCompile("(‘|’)"),
+			repl: `'`,
+		},
+		{ // Opening/Closing double quotes
+			re:   regexp.MustCompile("(“|”)"),
+			repl: `"`,
+		},
 		{ // Colored text
 			re:   regexp.MustCompile("{color:([^}]+)}(.*?){color}"),
 			repl: "<span style='color: $1'>$2</span>",
