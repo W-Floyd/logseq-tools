@@ -43,6 +43,10 @@ func JiraToMD(str string) string {
 			re:   regexp.MustCompile(`<(span|b) style='[^']+'>(\s)*<\/(span|b)>`),
 			repl: "$2",
 		},
+		{ // Quotes before block
+			re:   regexp.MustCompile(`('|")(<[^/])`),
+			repl: "\\$1$2",
+		},
 		{ // UnOrdered Lists
 			re: regexp.MustCompile(`(?m)^[ \t]*(\*+)\s+`),
 			repl: func(groups []string) string {
