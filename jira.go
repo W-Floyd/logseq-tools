@@ -429,7 +429,7 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 			lines[0] = regexp.MustCompile(matcher).ReplaceAllString(lines[0], "")
 			lines[0] = newPad + "\t- " + lines[0]
 
-			lines = append(lines, newPad+"\tlogseq.order-list-type:: number")
+			lines = append(lines, newPad+"\t  logseq.order-list-type:: number")
 		}
 
 		if !listItem {
