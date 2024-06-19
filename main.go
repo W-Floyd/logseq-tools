@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"os"
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
+	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
 	"github.com/tj/go-naturaldate"
@@ -44,6 +47,13 @@ var (
 	calendarLookaheadTime       *time.Time
 	debug                       *bool
 	verbose                     *bool
+	recent                      *bool
+	ignoreCache                 *bool
+	startTime                   = time.Now()
+	lastRun                     *time.Time
+	lastRunPath                 string
+	knownIssues                 = map[string]*jira.Issue{}
+	knownIssuePath              string
 )
 
 func init() {
@@ -74,7 +84,6 @@ func main() {
 	var err error
 
 	configFile := flag.String("config-path", "./config.json", "Config file to use")
-	// LogseqRoot:=
 
 	calendar = flag.Bool("calendar", false, "Whether to just parse calendar tags (into Markwhen)")
 	calendarPath = flag.String("calendar-path", "./calendar.mw", "Where to parse the calendar to")
@@ -82,8 +91,14 @@ func main() {
 	debug = flag.Bool("debug", false, "Whether to create debug files")
 	verbose = flag.Bool("verbose", false, "Whether to print more info")
 	logFile = flag.String("log-file", "./logfile", "Log file to use")
+	recent = flag.Bool("recent", true, "Whether to only check recent issues")
+	ignoreCache = flag.Bool("ignore-cache", false, "Whether to ignore cached issues")
 
 	flag.Parse()
+
+	if *verbose {
+		slog.SetLogLoggerLevel(slog.LevelInfo)
+	}
 
 	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
@@ -92,10 +107,9 @@ func main() {
 	}
 	defer f.Close()
 
-	log.SetOutput(f)
-
-	if *verbose {
-		slog.SetLogLoggerLevel(slog.LevelInfo)
+	if *ignoreCache && *recent {
+		slog.Error("Cannot look for recent only without cache")
+		return
 	}
 
 	if *calendar && calendarLookahead != nil && *calendarLookahead != "" {
@@ -120,8 +134,55 @@ func main() {
 		slog.Error(err.Error())
 	}
 
+	lastRunPath = strings.Join([]string{config.CacheRoot, "lastRun"}, "/") + ".json"
+
+	if *recent {
+
+		jsonFile, err := os.Open(lastRunPath)
+
+		if err != nil {
+			slog.Error("Failed to find or open file for last run timing, running as if you didn't specify -recent")
+			*recent = false
+		} else {
+
+			byteValue, _ := io.ReadAll(jsonFile)
+
+			err = json.Unmarshal(byteValue, &lastRun)
+			if err != nil {
+				slog.Error("Failed to unmarshal ", err)
+				return
+			}
+
+			jsonFile.Close()
+		}
+	}
+
+	knownIssuePath = strings.Join([]string{config.CacheRoot, "knownIssues"}, "/") + ".json"
+
+	if !*ignoreCache {
+
+		jsonFile, err := os.Open(knownIssuePath)
+
+		if err != nil {
+			slog.Warn("Failed to find or open file for known issues, assuming it hasn't been created yet")
+		} else {
+
+			byteValue, _ := io.ReadAll(jsonFile)
+
+			err = json.Unmarshal(byteValue, &knownIssues)
+			if err != nil {
+				slog.Error("Failed to unmarshal ", err)
+				return
+			}
+
+			jsonFile.Close()
+		}
+	}
+
 	ctx := context.Background()
 	errs, _ := errgroup.WithContext(ctx)
+
+	log.SetOutput(f)
 
 	for _, instance := range config.Jira.Instances {
 		if instance.Enabled {
@@ -155,6 +216,36 @@ func main() {
 	if err != nil {
 		slog.Error("Failed in WriteCalendar", err)
 	}
+
+	////
+
+	jsonBytes, err := json.Marshal(knownIssues)
+	if err != nil {
+		slog.Error("Failed in json.Marshal")
+		return
+	}
+
+	err = WriteFile(knownIssuePath, jsonBytes)
+	if err != nil {
+		slog.Error("Failed in write file " + knownIssuePath)
+		return
+	}
+
+	////
+
+	jsonBytes, err = json.Marshal(startTime)
+	if err != nil {
+		slog.Error("Failed in json.Marshal")
+		return
+	}
+
+	err = WriteFile(lastRunPath, jsonBytes)
+	if err != nil {
+		slog.Error("Failed in write file " + lastRunPath)
+		return
+	}
+
+	////
 
 	slog.Info("exiting")
 

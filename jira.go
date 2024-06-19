@@ -119,17 +119,22 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 	slog.Info("Processing Project: " + project)
 
-	var err error
-
 	issues := make(chan jira.Issue)
 
+	query := "project = " + project
+
+	if *recent {
+		query += " AND updated >= " + lastRun.Add(time.Second*-30).Format(`"2006/01/02 15:04"`)
+	}
+
+	if *calendar {
+		query += ` AND comment ~ 'ExtractTag'`
+	}
+
+	slog.Info("Query: " + query)
+
 	go func() error {
-		if *calendar {
-			err = GetIssues(c, "project = "+project+` AND comment ~ 'ExtractTag'`, project, issues)
-		} else {
-			err = GetIssues(c, "project = "+project, project, issues)
-		}
-		return err
+		return GetIssues(c, query, project, issues)
 	}()
 
 	c.progress[project].SetTotal(int64(len(issues)), false)
@@ -355,6 +360,7 @@ func (c *JiraConfig) createClient() (*jira.Client, error) {
 // Modified from https://github.com/andygrunwald/go-jira/issues/55#issuecomment-676631140
 func GetIssues(c *JiraConfig, searchString string, project string, issues chan jira.Issue) (err error) {
 	last := 0
+	newIssues := []*jira.Issue{}
 	for {
 		opt := &jira.SearchOptions{
 			MaxResults: 100,
@@ -376,6 +382,7 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 
 		total := resp.Total
 		for _, i := range chunk {
+			newIssues = append(newIssues, &i)
 			issues <- i
 		}
 		last = resp.StartAt + len(chunk)
@@ -384,6 +391,26 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 			break
 		}
 	}
+
+	for ik := range knownIssues { // Also want to reprocess
+		seen := false
+		for _, ni := range newIssues {
+			if ik == ni.Key {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			if knownIssues[ik].Fields.Project.Key == project {
+				issues <- *knownIssues[ik]
+			}
+		}
+	}
+
+	for _, ni := range newIssues {
+		knownIssues[ni.Key] = ni
+	}
+
 	close(issues)
 	return nil
 }
@@ -495,7 +522,7 @@ func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue
 		return nil, errors.Wrap(err, "Failed to make cache directory "+dir)
 	}
 
-	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
 
 		if fullIssueCheck == nil {
 			slog.Info("Fetching specific info for " + sparseIssue.Key)
@@ -544,7 +571,7 @@ func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue
 
 		err = json.Unmarshal(byteValue, &fullIssue)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to open file")
+			return nil, errors.Wrap(err, "Failed to unmarshal file")
 		}
 
 		jiraCacheHits.IncrBy(1)
@@ -569,7 +596,7 @@ func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
 		return errors.Wrap(err, "Failed to make cache directory "+dir)
 	}
 
-	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
 
 		slog.Info("Getting watchers for " + i.Key)
 		o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
