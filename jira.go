@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"slices"
 	"sort"
@@ -117,21 +119,22 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 	slog.Info("Processing Project: " + project)
 
-	var issues []jira.Issue
 	var err error
 
-	if *calendar {
-		issues, err = GetIssues(c, "project = "+project+` AND comment ~ 'ExtractTag'`)
-	} else {
-		issues, err = GetIssues(c, "project = "+project)
-	}
-	if err != nil {
-		return errors.Wrap(err, "Couldn't get issues for project "+project)
-	}
+	issues := make(chan jira.Issue)
+
+	go func() error {
+		if *calendar {
+			err = GetIssues(c, "project = "+project+` AND comment ~ 'ExtractTag'`, project, issues)
+		} else {
+			err = GetIssues(c, "project = "+project, project, issues)
+		}
+		return err
+	}()
 
 	c.progress[project].SetTotal(int64(len(issues)), false)
 
-	for _, issue := range issues {
+	for issue := range issues {
 		issue := issue
 		if *calendar {
 			errs.Go(func() error {
@@ -350,7 +353,7 @@ func (c *JiraConfig) createClient() (*jira.Client, error) {
 }
 
 // Modified from https://github.com/andygrunwald/go-jira/issues/55#issuecomment-676631140
-func GetIssues(c *JiraConfig, searchString string) (issues []jira.Issue, err error) {
+func GetIssues(c *JiraConfig, searchString string, project string, issues chan jira.Issue) (err error) {
 	last := 0
 	for {
 		opt := &jira.SearchOptions{
@@ -367,21 +370,22 @@ func GetIssues(c *JiraConfig, searchString string) (issues []jira.Issue, err err
 			opt,
 		})
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed in APIWrapper")
+			return errors.Wrap(err, "Failed in APIWrapper")
 		}
 		chunk := o[0].([]jira.Issue)
 
 		total := resp.Total
-		if issues == nil {
-			issues = make([]jira.Issue, 0, total)
+		for _, i := range chunk {
+			issues <- i
 		}
-		issues = append(issues, chunk...)
 		last = resp.StartAt + len(chunk)
+		c.progress[project].SetTotal(int64(last), false)
 		if last >= total {
 			break
 		}
 	}
-	return issues, nil
+	close(issues)
+	return nil
 }
 
 func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
@@ -481,25 +485,74 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 }
 
 func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
-	if fullIssueCheck == nil {
-		slog.Info("Fetching specific info for " + sparseIssue.Key)
 
-		o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
-			output = make([]any, 1)
-			output[0], resp, err = c.client.Issue.Get(context.Background(), a[0].(string), nil)
-			return output, resp, errors.Wrap(err, "Couldn't get issue "+a[0].(string))
-		}, []any{
-			sparseIssue.Key,
-		})
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed in APIWrapper")
+	cachedFilePath := strings.Join([]string{config.CacheRoot, sparseIssue.Key, time.Time(sparseIssue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + ".json"
+
+	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
+
+	err = os.MkdirAll(dir, os.ModeDir)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to make cache directory "+dir)
+	}
+
+	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) {
+
+		if fullIssueCheck == nil {
+			slog.Info("Fetching specific info for " + sparseIssue.Key)
+
+			o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+				output = make([]any, 1)
+				output[0], resp, err = c.client.Issue.Get(context.Background(), a[0].(string), nil)
+				return output, resp, errors.Wrap(err, "Couldn't get issue "+a[0].(string))
+			}, []any{
+				sparseIssue.Key,
+			})
+			if err != nil {
+				return nil, errors.Wrap(err, "Failed in APIWrapper")
+			}
+			fullIssue = o[0].(*jira.Issue)
+
+		} else {
+			fullIssue = fullIssueCheck
 		}
-		fullIssue = o[0].(*jira.Issue)
+
+		jsonBytes, err := json.Marshal(fullIssue)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed in json.Marshal")
+		}
+
+		err = WriteFile(cachedFilePath, jsonBytes)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed in write file "+cachedFilePath)
+		}
+
+	} else if err != nil {
+
+		return nil, errors.Wrap(err, cachedFilePath)
 
 	} else {
-		fullIssue = fullIssueCheck
+
+		jsonFile, err := os.Open(cachedFilePath)
+
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to open file")
+		}
+
+		defer jsonFile.Close()
+
+		byteValue, _ := io.ReadAll(jsonFile)
+
+		err = json.Unmarshal(byteValue, &fullIssue)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to open file")
+		}
+
+		jiraCacheHits.IncrBy(1)
+
 	}
+
 	return fullIssue, nil
+
 }
 
 func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
@@ -507,26 +560,73 @@ func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
 		return nil
 	}
 
-	slog.Info("Getting watchers for " + i.Key)
-	o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
-		output = make([]any, 1)
-		output[0], resp, err = c.client.Issue.GetWatchers(context.Background(), a[0].(string))
-		return output, resp, errors.Wrap(err, "Couldn't get watchers for "+a[0].(string))
-	}, []any{
-		i.ID,
-	})
-	if err != nil {
-		return errors.Wrap(err, "Failed in APIWrapper")
-	}
-	watchingUsers := o[0].(*[]jira.User)
+	cachedFilePath := strings.Join([]string{config.CacheRoot, i.Key, time.Time(i.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_watchers.json"
 
-	for _, u := range *watchingUsers {
-		nameText := u.DisplayName
-		if c.LinkNames {
-			nameText = "[[" + nameText + "]]"
-		}
-		*watchers = append(*watchers, nameText)
+	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
+
+	err := os.MkdirAll(dir, os.ModeDir)
+	if err != nil {
+		return errors.Wrap(err, "Failed to make cache directory "+dir)
 	}
+
+	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) {
+
+		slog.Info("Getting watchers for " + i.Key)
+		o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+			output = make([]any, 1)
+			output[0], resp, err = c.client.Issue.GetWatchers(context.Background(), a[0].(string))
+			return output, resp, errors.Wrap(err, "Couldn't get watchers for "+a[0].(string))
+		}, []any{
+			i.ID,
+		})
+		if err != nil {
+			return errors.Wrap(err, "Failed in APIWrapper")
+		}
+		watchingUsers := o[0].(*[]jira.User)
+
+		for _, u := range *watchingUsers {
+			nameText := u.DisplayName
+			if c.LinkNames {
+				nameText = "[[" + nameText + "]]"
+			}
+			*watchers = append(*watchers, nameText)
+		}
+
+		jsonBytes, err := json.Marshal(watchers)
+		if err != nil {
+			return errors.Wrap(err, "Failed in json.Marshal")
+		}
+
+		err = WriteFile(cachedFilePath, jsonBytes)
+		if err != nil {
+			return errors.Wrap(err, "Failed in write file "+cachedFilePath)
+		}
+
+	} else if err != nil {
+
+		return errors.Wrap(err, cachedFilePath)
+
+	} else {
+
+		jsonFile, err := os.Open(cachedFilePath)
+
+		if err != nil {
+			return errors.Wrap(err, "Failed to open file")
+		}
+
+		defer jsonFile.Close()
+
+		byteValue, _ := io.ReadAll(jsonFile)
+
+		err = json.Unmarshal(byteValue, &watchers)
+		if err != nil {
+			return errors.Wrap(err, "Failed to open file")
+		}
+
+		jiraCacheHits.IncrBy(1)
+
+	}
+
 	return nil
 }
 
@@ -611,10 +711,13 @@ func RecurseIssueMap(target string, output *([]string), depth int) error {
 func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i []any) (output []any, resp *jira.Response, err error) {
 	var body []byte
 	var errBody error
+	retryCount := 0
 	for {
+		retryCount += 1
 		c.apiLimited.Lock()
 		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still risk of race condition, but lessened
 		retry := false
+		jiraApiCalls.IncrBy(1)
 		output, resp, err = f(i)
 		if resp != nil {
 			body, errBody = io.ReadAll(resp.Body)
@@ -622,7 +725,11 @@ func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i [
 				err = errors.Wrap(err, "Failed to read response body: "+errBody.Error())
 			}
 		} else {
-			return nil, nil, errors.Wrap(err, "No response")
+			if retryCount < 3 {
+				continue
+			} else {
+				return nil, nil, errors.Wrap(err, "No response")
+			}
 		}
 		if resp.StatusCode != 200 && resp.StatusCode != 429 {
 			return nil, nil, errors.Wrap(
@@ -641,8 +748,8 @@ func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i [
 		if !retry {
 			break
 		}
+
 	}
-	jiraApiCallCount += 1
 	return output, resp, errors.Wrap(err, "Failed somewhere in APIWrapper")
 }
 
@@ -655,12 +762,14 @@ func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
 		defer c.apiLimited.Unlock()
 		resetTime, err := time.Parse("2006-01-02T15:04Z", resp.Response.Header.Get("X-Ratelimit-Reset"))
 		if err != nil {
-			return false, errors.Wrap(err, "Failed to parse X-Ratelimit-Reset time")
+			resetTime = time.Now().Add(time.Minute * 2)
+			slog.Error("Failed to parse X-Ratelimit-Reset time, defaulting to " + resetTime.Format(time.RFC822))
+			err = nil
 		}
 		resetTime = resetTime.Add(time.Second) // Add one second buffer just in case
-		slog.Info("API calls exhausted, sleeping until " + fmt.Sprint(resetTime))
+		slog.Warn("API calls exhausted, sleeping until " + fmt.Sprint(resetTime))
 		time.Sleep(time.Until(resetTime))
-		slog.Info("Waking up, API should be usable again, retrying last call.")
+		slog.Warn("Waking up, API should be usable again, retrying last call.")
 	} else {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {

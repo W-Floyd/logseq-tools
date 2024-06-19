@@ -17,11 +17,13 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tj/go-naturaldate"
 	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 	"golang.org/x/sync/errgroup"
 )
 
 type Config struct {
 	LogseqRoot string `json:"logseq_root"`
+	CacheRoot  string `json:"cache_root"`
 	Jira       struct {
 		Instances []*JiraConfig `json:"instances"` // Jira instances to process
 		Users     []struct {
@@ -32,14 +34,16 @@ type Config struct {
 }
 
 var (
-	config                = Config{}
-	jiraApiCallCount      = 0
-	progress              *mpb.Progress
-	calendar              *bool
-	calendarPath          *string
-	calendarLookahead     *string
-	calendarLookaheadTime *time.Time
-	debug                 *bool
+	config                      = Config{}
+	jiraApiCalls, jiraCacheHits *mpb.Bar
+	progress                    *mpb.Progress
+	calendar                    *bool
+	calendarPath                *string
+	logFile                     *string
+	calendarLookahead           *string
+	calendarLookaheadTime       *time.Time
+	debug                       *bool
+	verbose                     *bool
 )
 
 func init() {
@@ -47,11 +51,25 @@ func init() {
 		mpb.WithOutput(color.Output),
 		mpb.WithAutoRefresh(),
 	)
+	jiraApiCalls = progress.AddBar(0,
+		mpb.PrependDecorators(
+			decor.Name("API Calls", decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+			decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
+		),
+	)
+	jiraCacheHits = progress.AddBar(0,
+		mpb.PrependDecorators(
+			decor.Name("Cache Hits", decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+			decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
+		),
+	)
 }
 
 func main() {
 
 	slog.SetLogLoggerLevel(slog.LevelWarn)
+
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	var err error
 
@@ -62,8 +80,23 @@ func main() {
 	calendarPath = flag.String("calendar-path", "./calendar.mw", "Where to parse the calendar to")
 	calendarLookahead = flag.String("calendar-lookahead", "", "How far to look ahead")
 	debug = flag.Bool("debug", false, "Whether to create debug files")
+	verbose = flag.Bool("verbose", false, "Whether to print more info")
+	logFile = flag.String("log-file", "./logfile", "Log file to use")
 
 	flag.Parse()
+
+	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		slog.Error("error opening file: ", err)
+		return
+	}
+	defer f.Close()
+
+	log.SetOutput(f)
+
+	if *verbose {
+		slog.SetLogLoggerLevel(slog.LevelInfo)
+	}
 
 	if *calendar && calendarLookahead != nil && *calendarLookahead != "" {
 		now := time.Now()
@@ -76,8 +109,6 @@ func main() {
 		}
 		calendarLookaheadTime = &t
 	}
-
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	configRaw, err := os.ReadFile(*configFile)
 	if err != nil {
@@ -105,9 +136,9 @@ func main() {
 
 	err = errs.Wait()
 
-	if jiraApiCallCount > 0 {
+	if jiraApiCalls.Current() > 0 {
 		IssueMap()
-		slog.Info("Jira API calls: " + strconv.Itoa(jiraApiCallCount))
+		slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
 	}
 
 	if err != nil {
