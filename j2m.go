@@ -47,6 +47,10 @@ func JiraToMD(str string) string {
 			re:   regexp.MustCompile(`('|")(<[^/])`),
 			repl: "\\$1$2",
 		},
+		{ // #numbers need to be escaped
+			re:   regexp.MustCompile(`#([0-9]+)([^'0-9a-e]|\z)`),
+			repl: `\#$1$2`,
+		},
 		{ // UnOrdered Lists
 			re: regexp.MustCompile(`(?m)^[ \t]*(\*+)\s+`),
 			repl: func(groups []string) string {
@@ -164,6 +168,8 @@ func JiraToMD(str string) string {
 			str = jiration.re.ReplaceAllString(str, v)
 		case func([]string) string:
 			str = replaceAllStringSubmatchFunc(jiration.re, str, v)
+		case func(string) string:
+			str = jiration.re.ReplaceAllStringFunc(str, v)
 		default:
 			fmt.Printf("I don't know about type %T!\n", v)
 		}
