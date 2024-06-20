@@ -197,7 +197,7 @@ func main() {
 
 	err = errs.Wait()
 
-	if jiraApiCalls.Current() > 0 {
+	if jiraApiCalls.Current() > 0 && !*calendar {
 		IssueMap()
 		slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
 	}
@@ -210,8 +210,9 @@ func main() {
 		}
 		slog.Error(err.Error())
 	}
-
-	err = WriteCalendar()
+	if *calendar {
+		err = WriteCalendar()
+	}
 
 	if err != nil {
 		slog.Error("Failed in WriteCalendar", err)
