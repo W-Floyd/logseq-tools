@@ -5,10 +5,12 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 	"io"
+	"log"
 	"log/slog"
 	"math/rand"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,12 +30,14 @@ var (
 		mu   sync.Mutex
 		data []Milestone
 	}
+	groups map[string]*GroupTree = map[string]*GroupTree{}
 )
 
 type CalendarEntry interface {
 	MarkwhenLineItem() string
 	GetTags() []string
 	GetEarliestDate() time.Time
+	GetIssue() *jira.Issue
 }
 
 type Event struct {
@@ -59,6 +63,78 @@ type Milestone struct {
 	issue *jira.Issue
 }
 
+type GroupTree struct {
+	Name        string
+	Entries     []*CalendarEntry
+	ChildGroups []*GroupTree
+	parent      *GroupTree
+}
+
+func GetGroupTree(tag string) *GroupTree {
+	if _, ok := groups[tag]; ok {
+		return groups[tag]
+	}
+
+	builtPath := ""
+	for _, segment := range strings.Split(tag, "/") {
+
+		newBuiltPath := strings.TrimPrefix(builtPath+"/"+segment, "/")
+
+		g := &GroupTree{
+			Name: segment,
+		}
+
+		if builtPath != "" {
+			p := GetGroupTree(builtPath)
+			if _, ok := groups[newBuiltPath]; !ok {
+				p.AddChild(g)
+			}
+		} else {
+			if _, ok := groups[segment]; !ok {
+				groups[segment] = g
+			}
+		}
+
+		builtPath = newBuiltPath
+
+	}
+
+	return GetGroupTree(tag)
+
+}
+
+func (g *GroupTree) AddChild(c *GroupTree) *GroupTree {
+	g.AddToMap()
+	g.ChildGroups = append(g.ChildGroups, c)
+	c.parent = g
+	c.AddToMap()
+	return g
+}
+
+func (g *GroupTree) AddToMap() *GroupTree {
+	groups[g.GetTag()] = g
+	return g
+}
+
+func (g *GroupTree) GetTag() string {
+	iterationCount := 0
+	parent := g.parent
+	path := g.Name
+	for {
+		iterationCount += 1
+		if iterationCount > 1000 {
+			log.Fatalln("Loop detected in grouping")
+		}
+		if parent == nil {
+			break
+		}
+		path = parent.Name + "/" + path
+		parent = parent.parent
+
+	}
+	return path
+}
+
 func (e Event) MarkwhenLineItem() string {
 	format := "2006-01-02"
 	return e.Start.Format(format) + " / " + e.End.Format(format) + ": [" + e.Title + "](" + e.c.Connection.BaseURL + "browse/" + e.issue.Key + ")"
@@ -70,6 +146,14 @@ func (e Event) GetTags() []string {
 
 func (e Event) GetEarliestDate() time.Time {
 	return e.Start
+}
+
+func (e Event) GetIssue() *jira.Issue {
+	return e.issue
+}
+
+func (m Milestone) GetIssue() *jira.Issue {
+	return m.issue
 }
 
 func (m Milestone) MarkwhenLineItem() string {
@@ -96,7 +180,13 @@ func ProcessCalendar(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 	if fetchedIssue.Fields.Comments != nil && len(fetchedIssue.Fields.Comments.Comments) > 0 {
 		for _, comment := range fetchedIssue.Fields.Comments.Comments {
 			lines := strings.Split(comment.Body, "\n")
+			// hasTag := false
 			for _, line := range lines {
+				if !strings.Contains(line, "ExtractTag") {
+					continue
+				}
+				// hasTag = true
+
 				matches := regexp.MustCompile(`\[[^\]]+\]`).FindAllString(line, -1)
 
 				matchReal := []string{}
@@ -104,6 +194,7 @@ func ProcessCalendar(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 				for _, match := range matches {
 					matchReal = append(matchReal, regexp.MustCompile(`\[([^\]]+)\]`).ReplaceAllString(match, `$1`))
 				}
+
 				for _, match := range matchReal {
 					f, ok := tagFunc[match]
 					if ok {
@@ -111,6 +202,9 @@ func ProcessCalendar(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 					}
 				}
 			}
+			// if hasTag && issue.Fields.Assignee != nil {
+			// 	tagFunc["Event"](c, fetchedIssue, []string{"Person/" + issue.Fields.Assignee.DisplayName}, listTagFuncs())
+			// }
 		}
 	}
 
@@ -125,11 +219,13 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 
 		startTime, err := getStartDate(c, issue)
 		if err != nil {
-			slog.Warn("Cannot add as milestone based on missing start date", err)
+			slog.Warn("Cannot add "+issue.Key+" as event based on missing start date", err)
+			return nil
 		}
 
 		if time.Time(issue.Fields.Duedate).Compare(time.Time{}) != 1 {
-			slog.Warn("Cannot add as milestone based on missing due date")
+			slog.Warn("Cannot add " + issue.Key + " as event based on missing due date")
+			return nil
 		}
 
 		events.mu.Lock()
@@ -151,7 +247,7 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 
 		startTime, err := getStartDate(c, issue)
 		if err != nil {
-			slog.Warn("Cannot add as milestone base on start date", err)
+			slog.Warn("Cannot add "+issue.Key+" as milestone base on start date", err)
 		}
 
 		milestones.mu.Lock()
@@ -240,38 +336,106 @@ func WriteCalendar() error {
 		`- 1 month`,
 	}
 
+	colors := []string{}
+
+	tagsToColor := []string{}
+
 	for tag := range tags {
+		tagsToColor = append(tagsToColor, tag)
+	}
+
+	people := map[string]string{}
+
+	for _, entry := range items {
+		if entry.GetIssue().Fields.Assignee != nil {
+			people[entry.GetIssue().Fields.Assignee.DisplayName] = tagName("Person/Assignee/" + entry.GetIssue().Fields.Assignee.DisplayName)
+		}
+	}
+
+	for _, person := range people {
+		tagsToColor = append(tagsToColor, person)
+	}
+
+	for _, tag := range tagsToColor {
 		h := md5.New()
 		io.WriteString(h, tag)
 		r := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(h.Sum(nil)))))
-		output = append(output, "#"+tagName(tag)+": "+colorful.Hcl(
+		colors = append(colors, "#"+tagName(tag)+": "+colorful.Hcl(
 			r.Float64()*360.0,
 			0.5+r.Float64()*0.3,
 			0.5+r.Float64()*0.3).Hex())
-
 	}
+
+	slices.Sort(colors)
+
+	output = append(output, colors...)
 
 	output = append(output, "---", "")
 
-	for tag := range tags {
-		output = append(output, "section "+tag+" #"+tagName(tag))
-
-		section := []string{}
-
-		for _, item := range tags[tag] {
-			section = append(section, (*item).MarkwhenLineItem()+" #"+tagName(tag))
-		}
-
-		slices.Sort(section)
-
-		output = append(output, section...)
-		output = append(output, "endSection")
+	for tag, entries := range tags {
+		g := GetGroupTree(tag)
+		g.Entries = append(g.Entries, entries...)
 	}
 
-	slog.Info("test")
+	sections := [][]string{}
+
+	for _, g := range groups {
+		if g.parent == nil {
+			sections = append(sections, g.Print())
+		}
+	}
+
+	sort.SliceStable(sections, sortSliceOfSlices(sections))
+
+	for _, section := range sections {
+		output = append(output, section...)
+	}
 
 	return WriteFile(*calendarPath, []byte(strings.Join(output, "\n")))
 
+}
+
+func (g *GroupTree) Print() (output []string) {
+
+	header := "group"
+
+	if g.parent == nil {
+		header = "section"
+	}
+
+	output = append(output, header+" "+g.Name+" #"+tagName(g.GetTag()))
+
+	sections := [][]string{}
+	entries := []string{}
+
+	for _, c := range g.ChildGroups {
+		sections = append(sections, c.Print())
+	}
+
+	for _, item := range g.Entries {
+		line := (*item).MarkwhenLineItem() + " #" + tagName(g.GetTag())
+		if (*item).GetIssue().Fields.Assignee != nil {
+			line += " " + tagName("#Person/Assignee/"+(*item).GetIssue().Fields.Assignee.DisplayName)
+		}
+		entries = append(entries, line)
+	}
+
+	slices.Sort(entries)
+	sort.SliceStable(sections, sortSliceOfSlices(sections))
+
+	tail := "endGroup"
+
+	if g.parent == nil {
+		tail = "endSection"
+	}
+
+	for _, s := range sections {
+		output = append(output, s...)
+	}
+	output = append(output, entries...)
+	output = append(output, tail)
+
+	return
 }
 
 func getStartDate(c *JiraConfig, issue *jira.Issue) (t time.Time, err error) {
@@ -294,5 +458,32 @@ func getStartDate(c *JiraConfig, issue *jira.Issue) (t time.Time, err error) {
 }
 
 func tagName(tag string) string {
-	return strings.ReplaceAll(tag, " ", "_")
+	replacePairs := [][2]string{
+		{
+			" ", "_",
+		},
+		{
+			"/", "_",
+		},
+	}
+	for _, pair := range replacePairs {
+		tag = strings.ReplaceAll(tag, pair[0], pair[1])
+	}
+	return tag
+}
+
+func sortSliceOfSlices(sections [][]string) func(i, j int) bool {
+	return func(i, j int) bool {
+		// edge cases
+		if len(sections[i]) == 0 && len(sections[j]) == 0 {
+			return false // two empty slices - so one is not less than other i.e. false
+		}
+		if len(sections[i]) == 0 || len(sections[j]) == 0 {
+			return len(sections[i]) == 0 // empty slice listed "first" (change to != 0 to put them last)
+		}
+
+		// both slices len() > 0, so can test this now:
+		return sections[i][0] < sections[j][0]
+	}
+
 }
