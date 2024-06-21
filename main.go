@@ -234,16 +234,18 @@ func main() {
 
 	////
 
-	jsonBytes, err = json.Marshal(startTime)
-	if err != nil {
-		slog.Error("Failed in json.Marshal")
-		return
-	}
+	if !*calendar {
+		jsonBytes, err = json.Marshal(startTime)
+		if err != nil {
+			slog.Error("Failed in json.Marshal")
+			return
+		}
 
-	err = WriteFile(lastRunPath, jsonBytes)
-	if err != nil {
-		slog.Error("Failed in write file " + lastRunPath)
-		return
+		err = WriteFile(lastRunPath, jsonBytes)
+		if err != nil {
+			slog.Error("Failed in write file " + lastRunPath)
+			return
+		}
 	}
 
 	////
