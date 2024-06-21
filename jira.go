@@ -46,6 +46,7 @@ type JiraConfig struct {
 		Done []string `json:"done"` // Names to consider as done
 	} `json:"status"`
 	LinkNames   bool `json:"link_names"`   // Whether to [[link]] names
+	LinkDates   bool `json:"link_dates"`   // Whether to [[link]] dates
 	SearchUsers bool `json:"search_users"` // Whether to search users - may not be possible due to permissions
 
 	Actions struct {
@@ -191,9 +192,13 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		"description:: " + LogseqTransform(issue.Fields.Summary),
 		"status:: " + issue.Fields.Status.Name,
 		"status-simple:: " + SimplifyStatus(c, issue),
-		"date-created:: [[" + DateFormat(time.Time(issue.Fields.Created)) + "]]",
-		"date-created-sortable:: " + time.Time(issue.Fields.Created).Format("20060102"),
 	}
+
+	if c.LinkDates {
+		output = append(output, "date-created:: [["+DateFormat(time.Time(issue.Fields.Created))+"]]")
+	}
+
+	output = append(output, "date-created-sortable:: "+time.Time(issue.Fields.Created).Format("20060102"))
 
 	if issue.Fields.Parent != nil {
 		output = append(output, "parent:: [["+issue.Fields.Parent.Key+"]]")
@@ -216,10 +221,10 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	}
 
 	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
-		output = append(output,
-			"date_due:: [["+DateFormat(time.Time(issue.Fields.Duedate))+"]]",
-			"date_due_sortable:: "+time.Time(issue.Fields.Duedate).Format("20060102"),
-		)
+		if c.LinkDates {
+			output = append(output, "date_due:: [["+DateFormat(time.Time(issue.Fields.Duedate))+"]]")
+		}
+		output = append(output, "date_due_sortable:: "+time.Time(issue.Fields.Duedate).Format("20060102"))
 	}
 
 	if issue.Fields.Assignee != nil {

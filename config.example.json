@@ -11,6 +11,7 @@
                 "include_task": false,
                 "include_my_tasks": true,
                 "link_names": false,
+                "link_dates": false,
                 "search_users": false,
                 "connection": {
                     "base_url": "https://mycompany.atlassian.net/",
@@ -29,8 +30,7 @@
                     "XXXXX",
                     "XXXXX"
                 ],
-                "actions": {
-                }
+                "actions": {}
             }
         ]
     }
