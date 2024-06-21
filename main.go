@@ -49,11 +49,15 @@ var (
 	verbose                     *bool
 	recent                      *bool
 	ignoreCache                 *bool
-	startTime                   = time.Now()
+	masterStartTime             = time.Now()
 	lastRun                     *time.Time
 	lastRunPath                 string
-	knownIssues                 = map[string]*jira.Issue{}
-	knownIssuePath              string
+	knownIssues                 = map[string]*struct {
+		issue              *jira.Issue
+		customFields       *jira.CustomFields
+		parsedCustomFields map[string]string
+	}{}
+	knownIssuePath string
 )
 
 func init() {
@@ -86,7 +90,7 @@ func main() {
 	configFile := flag.String("config-path", "./config.json", "Config file to use")
 
 	calendar = flag.Bool("calendar", false, "Whether to just parse calendar tags (into Markwhen)")
-	calendarPath = flag.String("calendar-path", "./calendar.mw", "Where to parse the calendar to")
+	calendarPath = flag.String("calendar-path", "./calendar", "Prefix to parse the calendar to")
 	calendarLookahead = flag.String("calendar-lookahead", "", "How far to look ahead")
 	debug = flag.Bool("debug", false, "Whether to create debug files")
 	verbose = flag.Bool("verbose", false, "Whether to print more info")
@@ -97,7 +101,7 @@ func main() {
 	flag.Parse()
 
 	if *verbose {
-		slog.SetLogLoggerLevel(slog.LevelInfo)
+		slog.SetLogLoggerLevel(slog.LevelDebug)
 	}
 
 	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -197,7 +201,7 @@ func main() {
 
 	err = errs.Wait()
 
-	if jiraApiCalls.Current() > 0 && !*calendar {
+	if jiraApiCalls.Current() > 0 {
 		IssueMap()
 		slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
 	}
@@ -210,9 +214,8 @@ func main() {
 		}
 		slog.Error(err.Error())
 	}
-	if *calendar {
-		err = WriteCalendar()
-	}
+
+	err = WriteCalendarDefault()
 
 	if err != nil {
 		slog.Error("Failed in WriteCalendar", err)
@@ -234,18 +237,16 @@ func main() {
 
 	////
 
-	if !*calendar {
-		jsonBytes, err = json.Marshal(startTime)
-		if err != nil {
-			slog.Error("Failed in json.Marshal")
-			return
-		}
+	jsonBytes, err = json.Marshal(masterStartTime)
+	if err != nil {
+		slog.Error("Failed in json.Marshal")
+		return
+	}
 
-		err = WriteFile(lastRunPath, jsonBytes)
-		if err != nil {
-			slog.Error("Failed in write file " + lastRunPath)
-			return
-		}
+	err = WriteFile(lastRunPath, jsonBytes)
+	if err != nil {
+		slog.Error("Failed in write file " + lastRunPath)
+		return
 	}
 
 	////

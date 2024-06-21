@@ -3,8 +3,9 @@ module github.com/W-Floyd/logseq-tools
 go 1.22.2
 
 require (
-	github.com/MagicalTux/natsort v0.0.0-20220626140124-f8bd634d5139
+	github.com/MagicalTux/natsort v1.0.1
 	github.com/andygrunwald/go-jira/v2 v2.0.0-20240601090214-8c40f10caa10
+	github.com/davecgh/go-spew v1.1.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
 	github.com/lucasb-eyer/go-colorful v1.2.0

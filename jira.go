@@ -18,6 +18,7 @@ import (
 
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/pkg/errors"
 	"github.com/segmentio/fasthash/fnv1a"
 	"github.com/vbauerster/mpb/v8"
@@ -128,10 +129,6 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 		query += " AND updated >= " + lastRun.Add(time.Second*-30).Format(`"2006/01/02 15:04"`)
 	}
 
-	if *calendar {
-		query += ` AND comment ~ 'ExtractTag'`
-	}
-
 	slog.Info("Query: " + query)
 
 	go func() error {
@@ -142,17 +139,53 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 	for issue := range issues {
 		issue := issue
-		if *calendar {
-			errs.Go(func() error {
-				err := ProcessCalendar(wg, c, &issue, project)
+
+		errs.Go(func() error {
+
+			if _, ok := knownIssues[issue.Key]; !ok || knownIssues[issue.Key] == nil {
+				knownIssues[issue.Key] = &struct {
+					issue              *jira.Issue
+					customFields       *jira.CustomFields
+					parsedCustomFields map[string]string
+				}{}
+			}
+			knownIssues[issue.Key].issue = &issue
+
+			o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+				output = make([]any, 1)
+				output[0], resp, err = c.client.Issue.GetCustomFields(context.Background(), a[0].(string))
+				return output, resp, errors.Wrap(err, "Couldn't get custom fields for issue "+a[0].(string))
+			}, []any{
+				issue.ID,
+			})
+			if err != nil {
+				return errors.Wrap(err, "Failed in APIWrapper")
+			}
+			customFields := o[0].(jira.CustomFields)
+			knownIssues[issue.Key].customFields = &customFields
+
+			knownIssues[issue.Key].parsedCustomFields = map[string]string{}
+
+			if c.StartDateField != "" {
+				if _, ok := (*knownIssues[issue.Key].customFields)[c.StartDateField]; ok {
+					knownIssues[issue.Key].parsedCustomFields["start_date"] = (*knownIssues[issue.Key].customFields)[c.StartDateField]
+				}
+			}
+
+			err = ProcessCalendar(wg, c, &issue, project)
+			if err != nil {
 				return errors.Wrap(err, "Failed to ProcessCalendar "+issue.Key)
-			})
-		} else {
-			errs.Go(func() error {
-				err := ProcessIssue(wg, c, &issue, project)
+			}
+			err = ProcessIssue(wg, c, &issue, project)
+			if err != nil {
 				return errors.Wrap(err, "Failed to ProcessIssue "+issue.Key)
-			})
-		}
+			}
+			if err == nil {
+				c.progress[project].IncrBy(1)
+			}
+			return err
+		})
+
 	}
 
 	return errors.Wrap(errs.Wait(), "Goroutine failed from ProcessProject")
@@ -329,17 +362,13 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		}
 	}
 
-	if fetchedIssue == nil {
+	if fetchedIssue != nil {
 		issuesStore = append(issuesStore, fetchedIssue)
 	} else {
 		issuesStore = append(issuesStore, issue)
 	}
 
 	err = WritePage(issue.Key, []byte(strings.Join(output, "\n")))
-
-	if err == nil {
-		c.progress[project].IncrBy(1)
-	}
 
 	return err
 
@@ -397,6 +426,10 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 		}
 	}
 
+	for _, ni := range newIssues {
+		knownIssues[ni.Key].issue = ni
+	}
+
 	for ik := range knownIssues { // Also want to reprocess
 		seen := false
 		for _, ni := range newIssues {
@@ -406,14 +439,10 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 			}
 		}
 		if !seen {
-			if knownIssues[ik].Fields.Project.Key == project {
-				issues <- *knownIssues[ik]
+			if knownIssues[ik].issue.Fields.Project.Key == project {
+				issues <- *knownIssues[ik].issue
 			}
 		}
-	}
-
-	for _, ni := range newIssues {
-		knownIssues[ni.Key] = ni
 	}
 
 	close(issues)
@@ -745,6 +774,7 @@ func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i [
 	var errBody error
 	retryCount := 0
 	for {
+		slog.Debug("Running API call, retry " + strconv.Itoa(retryCount) + spew.Sdump(i))
 		retryCount += 1
 		c.apiLimited.Lock()
 		c.apiLimited.Unlock() //lint:ignore SA2001 as we've only checked so we can make our API call - still risk of race condition, but lessened

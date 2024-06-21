@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/md5"
 	"encoding/binary"
 	"io"
@@ -64,10 +63,11 @@ type Milestone struct {
 }
 
 type GroupTree struct {
-	Name        string
-	Entries     []*CalendarEntry
-	ChildGroups []*GroupTree
-	parent      *GroupTree
+	Name          string
+	TopLevelEntry *CalendarEntry // Will be used if possible
+	Entries       []*CalendarEntry
+	ChildGroups   []*GroupTree
+	parent        *GroupTree
 }
 
 func GetGroupTree(tag string) *GroupTree {
@@ -179,6 +179,9 @@ func ProcessCalendar(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 
 	if fetchedIssue.Fields.Comments != nil && len(fetchedIssue.Fields.Comments.Comments) > 0 {
 		for _, comment := range fetchedIssue.Fields.Comments.Comments {
+			if !strings.Contains(comment.Body, "ExtractTag") {
+				continue
+			}
 			lines := strings.Split(comment.Body, "\n")
 			// hasTag := false
 			for _, line := range lines {
@@ -208,8 +211,6 @@ func ProcessCalendar(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 		}
 	}
 
-	c.progress[project].IncrBy(1)
-
 	return
 
 }
@@ -217,7 +218,7 @@ func ProcessCalendar(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error = map[string]func(*JiraConfig, *jira.Issue, []string, []string) error{
 	"Event": func(c *JiraConfig, issue *jira.Issue, matches []string, reservedTags []string) error {
 
-		startTime, err := getStartDate(c, issue)
+		startTime, err := getStartDate(issue)
 		if err != nil {
 			slog.Warn("Cannot add "+issue.Key+" as event based on missing start date", err)
 			return nil
@@ -245,7 +246,7 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 	},
 	"Milestone/Start": func(c *JiraConfig, issue *jira.Issue, matches []string, reservedTags []string) (err error) {
 
-		startTime, err := getStartDate(c, issue)
+		startTime, err := getStartDate(issue)
 		if err != nil {
 			slog.Warn("Cannot add "+issue.Key+" as milestone base on start date", err)
 		}
@@ -304,7 +305,46 @@ func listTagFuncs() (out []string) {
 	return
 }
 
-func WriteCalendar() error {
+func WriteCalendarDefault() error {
+	return WriteCalendar(groups, "")
+}
+
+func WriteAllJira() error {
+	jiraGroups := map[string]*GroupTree{}
+
+	for _, i := range knownIssues {
+		path := ""
+		parent := &jira.Parent{
+			ID:  i.issue.ID,
+			Key: i.issue.Key,
+		}
+		for {
+			if parent == nil {
+				break
+			}
+			path = parent.Key + "/" + path
+			parent = knownIssues[parent.Key].issue.Fields.Parent
+		}
+		g := GetGroupTree(path)
+		e := Event{
+			Title: i.issue.Fields.Summary,
+			End:   time.Time(i.issue.Fields.Duedate),
+			issue: i.issue,
+		}
+
+		startTime, err := getStartDate(i.issue)
+		if err == nil {
+			e.Start = startTime
+		}
+
+		var cal CalendarEntry = e
+		g.TopLevelEntry = &cal
+	}
+
+	return WriteCalendar(jiraGroups, "all")
+}
+
+func WriteCalendar(groupsLocal map[string]*GroupTree, name string) error {
 
 	items := []CalendarEntry{}
 
@@ -379,7 +419,7 @@ func WriteCalendar() error {
 
 	sections := [][]string{}
 
-	for _, g := range groups {
+	for _, g := range groupsLocal {
 		if g.parent == nil {
 			sections = append(sections, g.Print())
 		}
@@ -391,7 +431,7 @@ func WriteCalendar() error {
 		output = append(output, section...)
 	}
 
-	return WriteFile(*calendarPath, []byte(strings.Join(output, "\n")))
+	return WriteFile(*calendarPath+name+".mw", []byte(strings.Join(output, "\n")))
 
 }
 
@@ -403,7 +443,12 @@ func (g *GroupTree) Print() (output []string) {
 		header = "section"
 	}
 
-	output = append(output, header+" "+g.Name+" #"+tagName(g.GetTag()))
+	if g.TopLevelEntry != nil {
+		i := (*g.TopLevelEntry).GetIssue()
+		output = append(output, header+" "+i.Key+" - "+i.Fields.Summary+" #"+tagName(g.GetTag()))
+	} else {
+		output = append(output, header+" "+g.Name+" #"+tagName(g.GetTag()))
+	}
 
 	sections := [][]string{}
 	entries := []string{}
@@ -438,14 +483,14 @@ func (g *GroupTree) Print() (output []string) {
 	return
 }
 
-func getStartDate(c *JiraConfig, issue *jira.Issue) (t time.Time, err error) {
+func getStartDate(issue *jira.Issue) (t time.Time, err error) {
 
-	customFields, _, err := c.client.Issue.GetCustomFields(context.Background(), issue.ID)
-	if err != nil {
-		return
+	_, ok := knownIssues[issue.Key]
+	if !ok {
+		return time.Time{}, errors.New("No start date defined for " + issue.Key)
 	}
+	start, ok := knownIssues[issue.Key].parsedCustomFields["start_date"]
 
-	start, ok := customFields[c.StartDateField]
 	if start == "" || !ok {
 		return time.Time{}, errors.New("No start date defined for " + issue.Key)
 	}
