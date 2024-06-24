@@ -61,12 +61,10 @@ type JiraConfig struct {
 }
 
 var (
-	issuesStore []*jira.Issue          = []*jira.Issue{}
-	users       map[string]string      = map[string]string{}
-	usersLock   *sync.Mutex            = &sync.Mutex{}
-	issues      map[string]*jira.Issue = map[string]*jira.Issue{}
-	parents     map[string]*string     = map[string]*string{}
-	children    map[string][]string    = map[string][]string{}
+	users     map[string]string   = map[string]string{}
+	usersLock *sync.Mutex         = &sync.Mutex{}
+	parents   map[string]*string  = map[string]*string{}
+	children  map[string][]string = map[string][]string{}
 )
 
 func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
@@ -327,12 +325,6 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 				output = append(output, "***")
 			}
 		}
-	}
-
-	if fetchedIssue == nil {
-		issuesStore = append(issuesStore, fetchedIssue)
-	} else {
-		issuesStore = append(issuesStore, issue)
 	}
 
 	err = WritePage(issue.Key, []byte(strings.Join(output, "\n")))
@@ -685,11 +677,7 @@ func LogseqTitle(issue *jira.Issue) string {
 func IssueMap() error {
 	output := []string{}
 
-	for _, i := range issuesStore {
-		issues[i.Key] = i
-	}
-
-	for key, issue := range issues {
+	for key, issue := range knownIssues {
 
 		if _, ok := children[key]; !ok {
 			children[key] = []string{}
@@ -723,7 +711,7 @@ func IssueMap() error {
 }
 
 func RecurseIssueMap(target string, output *([]string), depth int) error {
-	*output = append(*output, strings.Repeat("\t", depth)+"- [["+LogseqTitle(issues[target])+"]]")
+	*output = append(*output, strings.Repeat("\t", depth)+"- [["+LogseqTitle(knownIssues[target])+"]]")
 	if depth == 0 {
 		*output = append(*output, "  collapsed:: true")
 	}
