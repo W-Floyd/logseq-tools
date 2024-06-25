@@ -54,6 +54,7 @@ var (
 	lastRunPath                 string
 	knownIssues                 = map[string]*jira.Issue{}
 	knownIssuePath              string
+	issueUrlMatchers            = []*regexp.Regexp{}
 )
 
 func init() {
@@ -187,6 +188,21 @@ func main() {
 	errs, _ := errgroup.WithContext(ctx)
 
 	log.SetOutput(f)
+
+	// Issue links
+	for _, instance := range config.Jira.Instances {
+		for _, project := range instance.Projects {
+			urlPattern := regexp.QuoteMeta(instance.Connection.BaseURL) + `browse/(` + regexp.QuoteMeta(project) + `-[0-9]+)`
+			matcher := ""
+			for _, pair := range [][2]string{{`[`, `]`}, {`(`, `)`}} {
+				start := regexp.QuoteMeta(pair[0])
+				end := regexp.QuoteMeta(pair[1])
+
+				matcher = matcher + start + urlPattern + `(` + end + `|[^` + end + `]+` + end + `)`
+			}
+			issueUrlMatchers = append(issueUrlMatchers, regexp.MustCompile(matcher))
+		}
+	}
 
 	for _, instance := range config.Jira.Instances {
 		if instance.Enabled {

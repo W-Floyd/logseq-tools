@@ -498,6 +498,7 @@ func ParseJiraText(c *JiraConfig, input string, issue *jira.Issue) ([]string, er
 
 	for _, l := range description {
 
+		// Images
 		matches := re.FindAllString(l, -1)
 		for _, match := range matches {
 			filename := re.ReplaceAllString(match, `$2`)
@@ -595,6 +596,13 @@ func ParseJiraText(c *JiraConfig, input string, issue *jira.Issue) ([]string, er
 				}
 
 				lines[0] = strings.Replace(lines[0], rawAccountID, displayName, 1)
+			}
+		}
+
+		// Issue links
+		for _, matcher := range issueUrlMatchers {
+			for i, line := range lines {
+				lines[i] = matcher.ReplaceAllString(line, `[[$1]]`)
 			}
 		}
 
