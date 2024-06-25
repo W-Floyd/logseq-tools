@@ -256,7 +256,7 @@ func main() {
 
 func WritePage(title string, contents []byte) error {
 
-	return WriteFile(path.Join(config.LogseqRoot, "pages", PageNameToFileName(title)+".md"), contents)
+	return WriteFile(path.Join(config.LogseqRoot, "pages", "jira", PageNameToFileName(title)+".md"), contents)
 
 }
 
