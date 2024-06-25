@@ -3,7 +3,7 @@ module github.com/W-Floyd/logseq-tools
 go 1.22.2
 
 require (
-	github.com/MagicalTux/natsort v0.0.0-20220626140124-f8bd634d5139
+	github.com/MagicalTux/natsort v1.0.1
 	github.com/andygrunwald/go-jira/v2 v2.0.0-20240601090214-8c40f10caa10
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
@@ -18,6 +18,7 @@ require (
 require (
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
