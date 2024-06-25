@@ -161,6 +161,10 @@ func JiraToMD(str string) string {
 			re:   regexp.MustCompile(`\$`),
 			repl: `\$`,
 		},
+		{ // Image dimentions, would like to eventually make this into the logseq format we know
+			re:   regexp.MustCompile(`\|(width|height|thumbnail|smart)[^\)]*\)`),
+			repl: `)`,
+		},
 	}
 	for _, jiration := range jirations {
 		switch v := jiration.repl.(type) {
