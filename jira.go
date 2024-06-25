@@ -631,7 +631,7 @@ func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue
 		return nil, errors.Wrap(err, "Failed to make cache directory "+dir)
 	}
 
-	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
+	if _, err = os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
 
 		if fullIssueCheck == nil {
 			slog.Info("Fetching specific info for " + sparseIssue.Key)
