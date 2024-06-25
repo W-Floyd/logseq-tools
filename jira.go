@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -241,7 +243,12 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		output = append(output, "reporter:: "+nameText)
 	}
 
-	line, err := ParseJiraText(c, issue.Fields.Description)
+	fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
+	if err != nil {
+		return errors.Wrap(err, "Failed in GetIssue")
+	}
+
+	line, err := ParseJiraText(c, issue.Fields.Description, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in ParseJiraText")
 	}
@@ -316,12 +323,12 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 
 				output = append(output, "- "+nameText+" - Created: "+DateFormat(created)+" | Updated: "+DateFormat(updated))
 
-				line, err := ParseJiraText(c, comment.Body)
+				lines, err := ParseJiraText(c, comment.Body, fetchedIssue)
 				if err != nil {
 					return errors.Wrap(err, "Failed in ParseJiraText")
 				}
 
-				output = append(output, PrefixStringSlice(line, "\t")...)
+				output = append(output, PrefixStringSlice(lines, "\t")...)
 				output = append(output, "***")
 			}
 		}
@@ -335,6 +342,70 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 
 	return err
 
+}
+
+func SaveAttachment(c *JiraConfig, a *jira.Attachment) (logseqPath string, err error) {
+
+	filename := "assets/jira/jira_" + a.ID + filepath.Ext(a.Filename)
+
+	logseqPath = "../" + filename
+	filePath := config.LogseqRoot + "/" + filename
+
+	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
+
+		o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
+			output = make([]any, 1)
+
+			apiEndpoint := "rest/api/3/attachment/content/" + a[0].(string)
+
+			req, err := c.client.NewRequest(context.Background(), http.MethodGet, apiEndpoint, nil)
+			if err != nil {
+				err = errors.New("Error in c.client.NewRequest")
+				return
+			}
+
+			resp, err = c.client.Do(req, nil)
+
+			if err != nil {
+				err = errors.New("Error in c.client.Do")
+				return
+			}
+
+			slog.Debug("Reading attachment body")
+
+			fileContents, err := io.ReadAll(resp.Body)
+			if err != nil {
+				err = errors.Wrap(err, "Failed to read response body")
+				return
+			}
+
+			output[0] = []byte{}
+
+			output[0] = fileContents
+
+			return output, resp, errors.Wrap(err, "Couldn't download attachment with ID '"+a[0].(string)+"'")
+		}, []any{
+			a.ID,
+		})
+
+		if err != nil {
+			return "", errors.Wrap(err, "Failed in APIWrapper")
+		}
+
+		if o[0] == nil {
+			return "", errors.New("Output is empty")
+		}
+		fileContents := o[0].([]byte)
+
+		err = WriteFile(filePath, fileContents)
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to write attachment file")
+		}
+	} else {
+		jiraCacheHits.IncrBy(1)
+	}
+
+	return
 }
 
 func SimplifyStatus(c *JiraConfig, i *jira.Issue) string {
@@ -412,20 +483,52 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 	return nil
 }
 
-func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
+func ParseJiraText(c *JiraConfig, input string, issue *jira.Issue) ([]string, error) {
 
-	if *debug {
-		// Useful for debugging original content vs J2M output.
-		h1 := fnv1a.HashString64(input)
-
-		WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".original", []byte(input))
-		WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".formatted", []byte(JiraToMD(input)))
-	}
+	var err error
 
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}
 
+	imageMatcher := `(?U)(!\[\]\()([^\)]+)(\))`
+
+	re := regexp.MustCompile(imageMatcher)
+
+	imageReplacements := map[string]string{}
+
 	for _, l := range description {
+
+		matches := re.FindAllString(l, -1)
+		for _, match := range matches {
+			filename := re.ReplaceAllString(match, `$2`)
+			filepath := ""
+			if !strings.HasPrefix(filename, "http") {
+				if _, ok := imageReplacements[filename]; !ok {
+					found := false
+					for _, attachment := range issue.Fields.Attachments {
+						if attachment.Filename == filename {
+							filepath, err = SaveAttachment(c, attachment)
+							if err != nil {
+								return nil, errors.Wrap(err, "Failed to save attachment "+attachment.ID)
+							}
+							found = true
+							break
+						}
+					}
+					if found {
+						imageReplacements[filename] = filepath
+					} else {
+						slog.Warn("Did not find attachment for " + filename)
+						imageReplacements[filename] = filename
+					}
+				}
+
+				l = strings.ReplaceAll(l, filename, imageReplacements[filename])
+
+				l = re.ReplaceAllString(l, `![`+imageReplacements[filename]+`]($2)$3`)
+			}
+
+		}
 
 		lines := []string{l}
 		if lines[0] == "" {
@@ -498,6 +601,15 @@ func ParseJiraText(c *JiraConfig, input string) ([]string, error) {
 		descriptionFormatted = append(descriptionFormatted, lines...)
 	}
 
+	if *debug {
+		// Useful for debugging original content vs J2M output.
+		h1 := fnv1a.HashString64(input)
+
+		WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".original", []byte(input))
+		WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".formatted", []byte(strings.Join(description, "\n")))
+		WriteFile("./debug/"+strconv.FormatUint(h1, 36)+".final", []byte(strings.Join(descriptionFormatted, "\n")))
+	}
+
 	return descriptionFormatted, nil
 }
 
@@ -540,7 +652,7 @@ func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue
 			fullIssue = fullIssueCheck
 		}
 
-		jsonBytes, err := json.Marshal(fullIssue)
+		jsonBytes, err := json.MarshalIndent(fullIssue, "", "  ")
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed in json.Marshal")
 		}
@@ -616,7 +728,7 @@ func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
 			*watchers = append(*watchers, nameText)
 		}
 
-		jsonBytes, err := json.Marshal(watchers)
+		jsonBytes, err := json.MarshalIndent(watchers, "", "  ")
 		if err != nil {
 			return errors.Wrap(err, "Failed in json.Marshal")
 		}
