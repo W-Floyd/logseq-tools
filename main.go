@@ -220,7 +220,7 @@ func main() {
 
 	////
 
-	jsonBytes, err := json.Marshal(knownIssues)
+	jsonBytes, err := json.MarshalIndent(knownIssues, "", "  ")
 	if err != nil {
 		slog.Error("Failed in json.Marshal")
 		return
@@ -235,7 +235,7 @@ func main() {
 	////
 
 	if !*calendar {
-		jsonBytes, err = json.Marshal(startTime)
+		jsonBytes, err = json.MarshalIndent(startTime, "", "  ")
 		if err != nil {
 			slog.Error("Failed in json.Marshal")
 			return
