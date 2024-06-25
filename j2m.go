@@ -99,8 +99,8 @@ func JiraToMD(str string) string {
 			repl: "<sup>$1</sup>",
 		},
 		{ // Subscript
-			re:   regexp.MustCompile(`([^\[]|^)~([^~]*)~`),
-			repl: "$1<sub>$2</sub>",
+			re:   regexp.MustCompile(`(\s|^)([^\[]|^)~([^~]*)~(\s|$)`),
+			repl: "$1$2<sub>$3</sub>$4",
 		},
 		{ // Strikethrough
 			re:   regexp.MustCompile(`(\s+)-(\S+.*?\S)-(\s+)`),
