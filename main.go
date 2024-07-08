@@ -107,7 +107,7 @@ func main() {
 
 	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
-		slog.Error("error opening file: ", err)
+		slog.Error("error opening file: " + err.Error())
 		return
 	}
 	defer f.Close()
@@ -154,7 +154,7 @@ func main() {
 
 			err = json.Unmarshal(byteValue, &lastRun)
 			if err != nil {
-				slog.Error("Failed to unmarshal ", err)
+				slog.Error("Failed to unmarshal: " + err.Error())
 				return
 			}
 
@@ -176,7 +176,7 @@ func main() {
 
 			err = json.Unmarshal(byteValue, &knownIssues)
 			if err != nil {
-				slog.Error("Failed to unmarshal ", err)
+				slog.Error("Failed to unmarshal: " + err.Error())
 				return
 			}
 
@@ -235,7 +235,7 @@ func main() {
 	}
 
 	if err != nil {
-		slog.Error("Failed in WriteCalendar", err)
+		slog.Error("Failed in WriteCalendar: " + err.Error())
 	}
 
 	////

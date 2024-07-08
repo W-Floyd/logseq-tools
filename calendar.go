@@ -219,7 +219,7 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 
 		startTime, err := getStartDate(c, issue)
 		if err != nil {
-			slog.Warn("Cannot add "+issue.Key+" as event based on missing start date", err)
+			slog.Warn("Cannot add " + issue.Key + " as event based on missing start date - " + err.Error())
 			return nil
 		}
 
@@ -247,7 +247,7 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 
 		startTime, err := getStartDate(c, issue)
 		if err != nil {
-			slog.Warn("Cannot add "+issue.Key+" as milestone base on start date", err)
+			slog.Warn("Cannot add " + issue.Key + " as milestone base on start date - " + err.Error())
 		}
 
 		milestones.mu.Lock()
