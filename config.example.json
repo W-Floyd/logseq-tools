@@ -33,5 +33,15 @@
                 "actions": {}
             }
         ]
+    },
+    "calendar": {
+        "instances": [
+            {
+                "enabled": true,
+                "title": "Outlook",
+                "ics_url": "https://outlook.office365.com/owa/calendar/.../calendar.ics",
+                "update_past": false
+            }
+        ]
     }
 }

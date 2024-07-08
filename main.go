@@ -34,6 +34,9 @@ type Config struct {
 			DisplayName string `json:"display_name"` // Display name to print in place
 		} `json:"users"`
 	} `json:"jira"`
+	Calendar struct {
+		Instances []*CalendarConfig `json:"instances"` // Calendar instances to process
+	}
 }
 
 var (
@@ -205,6 +208,17 @@ func main() {
 	}
 
 	for _, instance := range config.Jira.Instances {
+		if instance.Enabled {
+			instance := instance
+			errs.Go(
+				func() error {
+					return instance.Process(errs)
+				},
+			)
+		}
+	}
+
+	for _, instance := range config.Calendar.Instances {
 		if instance.Enabled {
 			instance := instance
 			errs.Go(
