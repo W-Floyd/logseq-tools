@@ -71,6 +71,10 @@ var (
 
 func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
+	if !c.Enabled {
+		return nil
+	}
+
 	c.apiLimited = &sync.Mutex{}
 
 	c.client, err = c.createClient()

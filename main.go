@@ -208,25 +208,21 @@ func main() {
 	}
 
 	for _, instance := range config.Jira.Instances {
-		if instance.Enabled {
-			instance := instance
-			errs.Go(
-				func() error {
-					return instance.Process(errs)
-				},
-			)
-		}
+		instance := instance
+		errs.Go(
+			func() error {
+				return instance.Process(errs)
+			},
+		)
 	}
 
 	for _, instance := range config.Calendar.Instances {
-		if instance.Enabled {
-			instance := instance
-			errs.Go(
-				func() error {
-					return instance.Process(errs)
-				},
-			)
-		}
+		instance := instance
+		errs.Go(
+			func() error {
+				return instance.Process(errs)
+			},
+		)
 	}
 
 	err = errs.Wait()

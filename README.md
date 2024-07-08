@@ -80,3 +80,8 @@ Customize (or remove) the `jira-type` according to your own format.
 query-table:: true
 {{query (and (property :type "jira-ticket") (not (property :assignee)) (or (property :jira-type "Work-Item of Any Size") (property :jira-type "Objective-Based Work-Item with Duration of Days or Weeks") (property :jira-type "Fine-Grain Work-Item")) (not (property :status-simple "DONE")))}}
 ```
+
+## iCal
+
+Pulls a `.ics` file from online (e.g. Outlook) and parses it into a format suitable for the Agenda plugin, so that it shows through the day. Marks past events as `DONE` and upcoming events as `WAITING`
+Don't link to these events, as they will be overwritten on each run.
