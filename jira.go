@@ -128,7 +128,7 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 		query += " AND updated >= " + lastRun.Add(time.Second*-30).Format(`"2006/01/02 15:04"`)
 	}
 
-	if *calendar {
+	if *timeline {
 		query += ` AND comment ~ 'ExtractTag'`
 	}
 
@@ -142,10 +142,10 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 	for issue := range issues {
 		issue := issue
-		if *calendar {
+		if *timeline {
 			errs.Go(func() error {
-				err := ProcessCalendar(wg, c, &issue, project)
-				return errors.Wrap(err, "Failed to ProcessCalendar "+issue.Key)
+				err := ProcessTimeline(wg, c, &issue, project)
+				return errors.Wrap(err, "Failed to ProcessTimeline "+issue.Key)
 			})
 		} else {
 			errs.Go(func() error {

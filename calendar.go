@@ -33,7 +33,7 @@ var (
 	groups map[string]*GroupTree = map[string]*GroupTree{}
 )
 
-type CalendarEntry interface {
+type TimelineEntry interface {
 	MarkwhenLineItem() string
 	GetTags() []string
 	GetEarliestDate() time.Time
@@ -65,7 +65,7 @@ type Milestone struct {
 
 type GroupTree struct {
 	Name        string
-	Entries     []*CalendarEntry
+	Entries     []*TimelineEntry
 	ChildGroups []*GroupTree
 	parent      *GroupTree
 }
@@ -169,7 +169,7 @@ func (m Milestone) GetEarliestDate() time.Time {
 	return m.Date
 }
 
-func ProcessCalendar(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project string) (err error) {
+func ProcessTimeline(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project string) (err error) {
 	var fetchedIssue *jira.Issue
 
 	fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
@@ -304,9 +304,9 @@ func listTagFuncs() (out []string) {
 	return
 }
 
-func WriteCalendar() error {
+func WriteTimeline() error {
 
-	items := []CalendarEntry{}
+	items := []TimelineEntry{}
 
 	for _, e := range events.data {
 		items = append(items, e)
@@ -315,10 +315,10 @@ func WriteCalendar() error {
 		items = append(items, m)
 	}
 
-	tags := map[string][]*CalendarEntry{}
+	tags := map[string][]*TimelineEntry{}
 
 	for _, item := range items {
-		if calendarLookaheadTime == nil || item.GetEarliestDate().Before(*calendarLookaheadTime) {
+		if timelineLookaheadTime == nil || item.GetEarliestDate().Before(*timelineLookaheadTime) {
 			for _, tag := range item.GetTags() {
 				tags[tag] = append(tags[tag], &item)
 			}
@@ -327,7 +327,7 @@ func WriteCalendar() error {
 
 	output := []string{
 		"---",
-		"title: WMS Calendar",
+		"title: WMS Timeline",
 		`view:`,
 		`- \*`,
 		`ranges:`,
@@ -391,7 +391,7 @@ func WriteCalendar() error {
 		output = append(output, section...)
 	}
 
-	return WriteFile(*calendarPath, []byte(strings.Join(output, "\n")))
+	return WriteFile(*timelinePath, []byte(strings.Join(output, "\n")))
 
 }
 

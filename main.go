@@ -40,11 +40,11 @@ var (
 	config                      = Config{}
 	jiraApiCalls, jiraCacheHits *mpb.Bar
 	progress                    *mpb.Progress
-	calendar                    *bool
-	calendarPath                *string
+	timeline                    *bool
+	timelinePath                *string
 	logFile                     *string
-	calendarLookahead           *string
-	calendarLookaheadTime       *time.Time
+	timelineLookahead           *string
+	timelineLookaheadTime       *time.Time
 	debug                       *bool
 	verbose                     *bool
 	recent                      *bool
@@ -86,9 +86,9 @@ func main() {
 
 	configFile := flag.String("config-path", "./config.json", "Config file to use")
 
-	calendar = flag.Bool("calendar", false, "Whether to just parse calendar tags (into Markwhen)")
-	calendarPath = flag.String("calendar-path", "./calendar.mw", "Where to parse the calendar to")
-	calendarLookahead = flag.String("calendar-lookahead", "", "How far to look ahead")
+	timeline = flag.Bool("timeline", false, "Whether to just parse timeline tags (into Markwhen)")
+	timelinePath = flag.String("timeline-path", "./timeline.mw", "Where to parse the timeline to")
+	timelineLookahead = flag.String("timeline-lookahead", "", "How far to look ahead")
 	debug = flag.Bool("debug", false, "Whether to create debug files")
 	verbose = flag.Bool("verbose", false, "Whether to print more info")
 	logFile = flag.String("log-file", "./logfile", "Log file to use")
@@ -117,16 +117,16 @@ func main() {
 		return
 	}
 
-	if *calendar && calendarLookahead != nil && *calendarLookahead != "" {
+	if *timeline && timelineLookahead != nil && *timelineLookahead != "" {
 		now := time.Now()
-		t, err := naturaldate.Parse(*calendarLookahead, now)
+		t, err := naturaldate.Parse(*timelineLookahead, now)
 		if err != nil {
 			slog.Error(err.Error())
 		}
 		if t == now {
 			slog.Error("Unrecognized natural date string")
 		}
-		calendarLookaheadTime = &t
+		timelineLookaheadTime = &t
 	}
 
 	configRaw, err := os.ReadFile(*configFile)
@@ -217,7 +217,7 @@ func main() {
 
 	err = errs.Wait()
 
-	if jiraApiCalls.Current() > 0 && !*calendar {
+	if jiraApiCalls.Current() > 0 && !*timeline {
 		IssueMap()
 		slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
 	}
@@ -230,12 +230,12 @@ func main() {
 		}
 		slog.Error(err.Error())
 	}
-	if *calendar {
-		err = WriteCalendar()
+	if *timeline {
+		err = WriteTimeline()
 	}
 
 	if err != nil {
-		slog.Error("Failed in WriteCalendar: " + err.Error())
+		slog.Error("Failed in WriteTimeline: " + err.Error())
 	}
 
 	////
@@ -254,7 +254,7 @@ func main() {
 
 	////
 
-	if !*calendar {
+	if !*timeline {
 		jsonBytes, err = json.MarshalIndent(startTime, "", "  ")
 		if err != nil {
 			slog.Error("Failed in json.Marshal")
