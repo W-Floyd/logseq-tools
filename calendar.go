@@ -19,7 +19,14 @@ type CalendarConfig struct {
 	Enabled    bool   `json:"enabled"`
 	Title      string `json:"title"`
 	IcsUrl     string `json:"ics_url"`
-	UpdatePast bool   `json:"update_past"`
+	Exclusions struct {
+		MaxDuration struct {
+			Enabled     bool    `json:"enabled"`
+			LengthHours float64 `json:"length_hours"`
+		} `json:"max_duration"`
+		Titles    []string `json:"titles"`
+		PastDates bool     `json:"past_dates"`
+	} `json:"exclusions"`
 }
 
 func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
@@ -48,6 +55,8 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 
 	cal := gocal.NewParser(resp.Body)
 	cal.SkipBounds = true
+	end := time.Now().Add(time.Hour * 24 * 180)
+	cal.End = &end
 
 	cal.Parse()
 
@@ -71,7 +80,13 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 
 		duration := e.End.Sub(*e.Start)
 
-		if e.Status == "CANCELED" || strings.HasPrefix(e.Summary, "Canceled: ") || duration >= time.Hour*8 {
+		// Excluded titles
+		if slices.Contains(c.Exclusions.Titles, e.Summary) {
+			continue
+		}
+
+		// MaxDuration
+		if c.Exclusions.MaxDuration.Enabled && duration >= time.Duration(c.Exclusions.MaxDuration.LengthHours*float64(time.Hour)) {
 			continue
 		}
 
@@ -81,14 +96,20 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 
 		text := []string{}
 
-		if e.End.Before(time.Now()) {
+		if e.Status == "CANCELED" || strings.HasPrefix(e.Summary, "Canceled: ") {
 			text = append(text,
-				"- DONE [[Calendar Event]] - "+e.Summary,
+				"- CANCELED [[Calendar Event]] - "+e.Summary,
 			)
 		} else {
-			text = append(text,
-				"- WAITING [[Calendar Event]] - "+e.Summary,
-			)
+			if e.End.Before(time.Now()) {
+				text = append(text,
+					"- DONE [[Calendar Event]] - "+e.Summary,
+				)
+			} else {
+				text = append(text,
+					"- WAITING [[Calendar Event]] - "+e.Summary,
+				)
+			}
 		}
 
 		text = append(text,
@@ -105,7 +126,7 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 	}
 
 	for k, d := range days {
-		if time.Now().Format(dateFormat) <= k || c.UpdatePast {
+		if time.Now().Format(dateFormat) <= k || c.Exclusions.PastDates {
 			err = WriteFile(
 				path.Join(
 					config.LogseqRoot,
