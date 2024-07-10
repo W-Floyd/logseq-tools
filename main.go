@@ -250,6 +250,21 @@ func main() {
 
 	////
 
+	for _, i := range knownIssues {
+		i.Fields.Unknowns = nil
+		for _, si := range i.Fields.Subtasks {
+			si.Fields.Unknowns = nil
+		}
+		for _, l := range i.Fields.IssueLinks {
+			if l.OutwardIssue != nil {
+				l.OutwardIssue.Fields.Unknowns = nil
+			}
+			if l.InwardIssue != nil {
+				l.InwardIssue.Fields.Unknowns = nil
+			}
+		}
+	}
+
 	jsonBytes, err := json.MarshalIndent(knownIssues, "", "  ")
 	if err != nil {
 		slog.Error("Failed in json.Marshal")
