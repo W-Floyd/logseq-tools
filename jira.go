@@ -44,8 +44,12 @@ type JiraConfig struct {
 	IncludeTask      bool     `json:"include_task"`       // Whether to include a task on each item with a due date
 	IncludeMyTasks   bool     `json:"include_my_tasks"`   // Whether to include a my tasks in all cases
 	StartDateField   string   `json:"start_date_field"`   // Custom field to use for start dates
-	Status           struct {
-		Done []string `json:"done"` // Names to consider as done
+	Type             []struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	} `json:"type"`
+	Status struct {
+		Done []string `json:"done"` // Statuses to consider as done
 	} `json:"status"`
 	LinkNames   bool `json:"link_names"`   // Whether to [[link]] names
 	LinkDates   bool `json:"link_dates"`   // Whether to [[link]] dates
@@ -190,7 +194,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		"alias:: " + issue.Key,
 		"title:: " + LogseqTitle(issue),
 		"type:: jira-ticket",
-		"jira-type:: " + issue.Fields.Type.Description,
+		"jira-type:: " + JiraTypeSubstitute(c, issue),
 		"jira-project:: " + project,
 		"url:: " + c.Connection.BaseURL + "browse/" + issue.Key,
 		"description:: " + LogseqTransform(issue.Fields.Summary),
@@ -971,4 +975,13 @@ func FindUser(c *JiraConfig, id string) (string, error) {
 
 	return users[id], errors.Wrap(err, "Failed somewhere in FindUser")
 
+}
+
+func JiraTypeSubstitute(c *JiraConfig, issue *jira.Issue) string {
+	for _, pair := range c.Type {
+		if issue.Fields.Type.Description == pair.From {
+			return pair.To
+		}
+	}
+	return issue.Fields.Type.Description
 }
