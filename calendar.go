@@ -119,7 +119,14 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 				durationMinutes,
 			)+"m",
 			"  :END:",
+			"  status:: "+e.Status,
 		)
+
+		if e.Organizer != nil {
+			text = append(text,
+				"  organizer:: "+e.Organizer.Value,
+			)
+		}
 
 		days[page] = append(days[page], text...)
 
