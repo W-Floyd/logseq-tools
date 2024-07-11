@@ -16,10 +16,11 @@ import (
 )
 
 type CalendarConfig struct {
-	Enabled    bool   `json:"enabled"`
-	Title      string `json:"title"`
-	IcsUrl     string `json:"ics_url"`
-	Exclusions struct {
+	Enabled       bool   `json:"enabled"`
+	Title         string `json:"title"`
+	IcsUrl        string `json:"ics_url"`
+	AllEventsDone bool   `json:"all_events_done"`
+	Exclusions    struct {
 		MaxDuration struct {
 			Enabled     bool    `json:"enabled"`
 			LengthHours float64 `json:"length_hours"`
@@ -101,7 +102,7 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 				"- CANCELED [[Calendar Event]] - "+e.Summary,
 			)
 		} else {
-			if e.End.Before(time.Now()) {
+			if e.End.Before(time.Now()) || c.AllEventsDone {
 				text = append(text,
 					"- DONE [[Calendar Event]] - "+e.Summary,
 				)
