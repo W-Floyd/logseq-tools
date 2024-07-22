@@ -6,3 +6,5 @@ config.json
 /debug/
 /cache/
 /logfile
+/.lsp/
+/.clj-kondo/

@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"github.com/zeebo/xxh3"
 )
 
 func SearchAndReplace(
@@ -26,4 +28,11 @@ func DateFormat(input time.Time) string {
 
 type stackTracer interface {
 	StackTrace() errors.StackTrace
+}
+
+// Adapted from https://gist.github.com/PaulBradley/08598aa755a6845f46691ab363ddf7f6
+func deterministicGUID(input string) string {
+	h := xxh3.HashString128(input).Bytes()
+	guid, _ := uuid.FromBytes(h[:])
+	return guid.String()
 }

@@ -18,6 +18,7 @@ import (
 
 	"log/slog"
 
+	"dario.cat/mergo"
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/pkg/errors"
@@ -29,41 +30,59 @@ import (
 
 type JiraConfig struct {
 	Connection struct {
-		BaseURL     string `json:"base_url"`
-		Username    string `json:"username"`
-		DisplayName string `json:"display_name"`
-		APIToken    string `json:"api_token"`
-		Parallel    *int   `json:"parallel"`
+		BaseURL     *string `json:"base_url"`
+		Username    *string `json:"username"`
+		DisplayName *string `json:"display_name"`
+		APIToken    *string `json:"api_token"`
+		Parallel    *int    `json:"parallel"`
 	} `json:"connection"`
-	Projects         []string `json:"projects"`           // XXXXX string identifier of projects to process
-	Enabled          bool     `json:"enabled"`            // Whether to process this Jira instance
-	IncludeWatchers  bool     `json:"include_watchers"`   // This can be slow, so you may want to disable it
-	IncludeComments  bool     `json:"include_comments"`   // This can be slow, so you may want to disable it
-	ExcludeFromGraph bool     `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
-	IncludeDone      bool     `json:"include_done"`       // Whether to include done items to help clean up the list
-	IncludeTask      bool     `json:"include_task"`       // Whether to include a task on each item with a due date
-	IncludeMyTasks   bool     `json:"include_my_tasks"`   // Whether to include a my tasks in all cases
-	StartDateField   string   `json:"start_date_field"`   // Custom field to use for start dates
-	Type             []struct {
-		From string `json:"from"`
-		To   string `json:"to"`
-	} `json:"type"`
-	Status struct {
-		Done []string `json:"done"` // Statuses to consider as done
-	} `json:"status"`
-	LinkNames   bool `json:"link_names"`   // Whether to [[link]] names
-	LinkDates   bool `json:"link_dates"`   // Whether to [[link]] dates
-	SearchUsers bool `json:"search_users"` // Whether to search users - may not be possible due to permissions
 
-	Actions struct {
-	} `json:"actions"`
-
-	// TODO - Implement
-	// IncludeURL       bool         `json:"include_url"`        // Whether to include the URL in the page name to disambiguate instances
+	Options  JiraOptions    `json:"options"`
+	Projects []*JiraProject `json:"projects"`
 
 	apiLimited *sync.Mutex  // Lock this to prevent calls while API cools down, unlock once done
 	client     *jira.Client // Client to use for communication
 	progress   map[string]*mpb.Bar
+}
+
+type JiraProject struct {
+	Key     *string     `json:"key"`     // Project key
+	Options JiraOptions `json:"options"` // Project specific options
+	config  *JiraConfig // Config for reference
+}
+
+type JiraOptions struct {
+	Enabled          *bool `json:"enabled"`            // Whether to process this Jira project
+	IncludeWatchers  *bool `json:"include_watchers"`   // This can be slow, so you may want to disable it
+	IncludeComments  *bool `json:"include_comments"`   // This can be slow, so you may want to disable it
+	ExcludeFromGraph *bool `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
+	IncludeDone      *bool `json:"include_done"`       // Whether to include done items to help clean up the list
+	IncludeTask      *bool `json:"include_task"`       // Whether to include a task on each item with a due date
+	IncludeMyTasks   *bool `json:"include_my_tasks"`   // Whether to include my tasks in all cases
+	LinkNames        *bool `json:"link_names"`         // Whether to [[link]] names
+	LinkDates        *bool `json:"link_dates"`         // Whether to [[link]] dates
+	SearchUsers      *bool `json:"search_users"`       // Whether to search users - may not be possible due to permissions
+
+	CustomFields []struct {
+		From *string `json:"from"`
+		To   *string `json:"to"`
+		As   *string `json:"date"`
+	} `json:"custom_fields"`
+
+	Status struct {
+		Match []struct {
+			From    []*string `json:"from"`    // Statuses to translate from
+			To      *string   `json:"to"`      // Status to translate to
+			Exclude *bool     `json:"exclude"` // Whether to exclude any matching statuses
+		} `json:"match"`
+		Default *string `json:"default"`
+	} `json:"status"`
+
+	Type []struct {
+		From    []*string `json:"from"`
+		To      *string   `json:"to"`
+		Exclude *bool     `json:"exclude"`
+	} `json:"type"`
 }
 
 var (
@@ -75,7 +94,16 @@ var (
 
 func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
-	if !c.Enabled {
+	err = mergo.Merge(&c.Options, config.Jira.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+	if err != nil {
+		return errors.Wrap(err, "Couldn't merge GeneralOptions with InstanceOptions")
+	}
+
+	for _, p := range c.Projects {
+		p.config = c
+	}
+
+	if !*c.Options.Enabled {
 		return nil
 	}
 
@@ -92,7 +120,7 @@ func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
 		pbar := progress.AddBar(0,
 			mpb.PrependDecorators(
-				decor.Name(project, decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+				decor.Name(*project.Key, decor.WC{C: decor.DindentRight | decor.DextraSpace}),
 				decor.Name("processing", decor.WCSyncSpaceR),
 				decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
 			),
@@ -101,15 +129,15 @@ func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 			),
 		)
 
-		c.progress[project] = pbar
+		c.progress[*project.Key] = pbar
 
 	}
 
 	for _, project := range c.Projects {
 
-		err = ProcessProject(wg, c, project)
+		err = ProcessProject(wg, project)
 		if err != nil {
-			return errors.Wrap(err, "Failed processing project "+project)
+			return errors.Wrap(err, "Failed processing project "+*project.Key)
 		}
 	}
 
@@ -117,7 +145,14 @@ func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
 }
 
-func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
+func ProcessProject(wg *errgroup.Group, project *JiraProject) error {
+
+	err := mergo.Merge(&project.Options, project.config.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+	if err != nil {
+		return errors.Wrap(err, "Couldn't merge InstanceOptions with Options")
+	}
+
+	c := project.config
 
 	errs, _ := errgroup.WithContext(context.Background())
 	if c.Connection.Parallel != nil {
@@ -126,11 +161,11 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 		errs.SetLimit(4)
 	}
 
-	slog.Info("Processing Project: " + project)
+	slog.Info("Processing Project: " + *project.Key)
 
 	issues := make(chan jira.Issue)
 
-	query := "project = " + project
+	query := "project = " + *project.Key
 
 	if *recent {
 		query += " AND updated >= " + lastRun.Add(time.Second*-30).Format(`"2006/01/02 15:04"`)
@@ -143,21 +178,21 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 	slog.Info("Query: " + query)
 
 	go func() error {
-		return GetIssues(c, query, project, issues)
+		return GetIssues(query, project, issues)
 	}()
 
-	c.progress[project].SetTotal(int64(len(issues)), false)
+	c.progress[*project.Key].SetTotal(int64(len(issues)), false)
 
 	for issue := range issues {
 		issue := issue
 		if *timeline {
 			errs.Go(func() error {
-				err := ProcessTimeline(wg, c, &issue, project)
+				err := ProcessTimeline(wg, &issue, project)
 				return errors.Wrap(err, "Failed to ProcessTimeline "+issue.Key)
 			})
 		} else {
 			errs.Go(func() error {
-				err := ProcessIssue(wg, c, &issue, project)
+				err := ProcessIssue(wg, &issue, project)
 				return errors.Wrap(err, "Failed to ProcessIssue "+issue.Key)
 			})
 		}
@@ -167,7 +202,9 @@ func ProcessProject(wg *errgroup.Group, c *JiraConfig, project string) error {
 
 }
 
-func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project string) (err error) {
+func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (err error) {
+
+	c := project.config
 
 	var fetchedIssue *jira.Issue // Use GetIssue() on this to populate on first use, and reuse thereafter
 	watchers := &[]string{}      // use GetWatchers() on this to populate on first use, and reuse thereafter
@@ -177,15 +214,15 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	//   return nil
 	// }
 
-	if !c.IncludeDone && func() bool {
-		for _, n := range c.Status.Done {
-			if issue.Fields.Status.Name == n {
-				return true
+	// Skip if excluded by a matcher
+	for _, matcher := range project.Options.Status.Match {
+		if matcher.Exclude != nil && *matcher.Exclude {
+			for _, m := range matcher.From {
+				if *m == issue.Fields.Status.Name {
+					return nil
+				}
 			}
 		}
-		return false
-	}() {
-		return nil
 	}
 
 	slog.Info("Processing Issue: " + issue.Key)
@@ -194,15 +231,15 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		"alias:: " + issue.Key,
 		"title:: " + LogseqTitle(issue),
 		"type:: jira-ticket",
-		"jira-type:: " + JiraTypeSubstitute(c, issue),
-		"jira-project:: " + project,
-		"url:: " + c.Connection.BaseURL + "browse/" + issue.Key,
+		"jira-type:: " + JiraTypeSubstitute(project, issue),
+		"jira-project:: " + *project.Key,
+		"url:: " + *c.Connection.BaseURL + "browse/" + issue.Key,
 		"description:: " + LogseqTransform(issue.Fields.Summary),
 		"status:: " + issue.Fields.Status.Name,
-		"status-simple:: " + SimplifyStatus(c, issue),
+		"status-simple:: " + SimplifyStatus(project, issue),
 	}
 
-	if c.LinkDates {
+	if *project.Options.LinkDates {
 		output = append(output, "date-created:: [["+DateFormat(time.Time(issue.Fields.Created))+"]]")
 	}
 
@@ -212,13 +249,13 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		output = append(output, "parent:: [["+issue.Fields.Parent.Key+"]]")
 	}
 
-	if c.ExcludeFromGraph {
+	if *project.Options.ExcludeFromGraph {
 		output = append(output, "exclude-from-graph-view:: true")
 	}
 
-	if c.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
+	if *project.Options.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
 
-		err = GetWatchers(c, issue, watchers)
+		err = GetWatchers(project, issue, watchers)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetWatchers")
 		}
@@ -229,7 +266,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	}
 
 	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
-		if c.LinkDates {
+		if *project.Options.LinkDates {
 			output = append(output, "date_due:: [["+DateFormat(time.Time(issue.Fields.Duedate))+"]]")
 		}
 		output = append(output, "date_due_sortable:: "+time.Time(issue.Fields.Duedate).Format("20060102"))
@@ -237,7 +274,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 
 	if issue.Fields.Assignee != nil {
 		nameText := issue.Fields.Assignee.DisplayName
-		if c.LinkNames {
+		if *project.Options.LinkNames {
 			nameText = "[[" + nameText + "]]"
 		}
 		output = append(output, "assignee:: "+nameText)
@@ -245,18 +282,25 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 
 	if issue.Fields.Reporter != nil {
 		nameText := issue.Fields.Reporter.DisplayName
-		if c.LinkNames {
+		if *project.Options.LinkNames {
 			nameText = "[[" + nameText + "]]"
 		}
 		output = append(output, "reporter:: "+nameText)
 	}
+
+	customFields, err := TranslateCustomFields(project, issue)
+	if err != nil {
+		return errors.Wrap(err, "Failed in TranslateCustomFields")
+	}
+
+	output = append(output, customFields...)
 
 	fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in GetIssue")
 	}
 
-	line, err := ParseJiraText(c, issue.Fields.Description, fetchedIssue)
+	line, err := ParseJiraText(project, issue.Fields.Description, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in ParseJiraText")
 	}
@@ -288,14 +332,16 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 
 	}
 
-	if (c.IncludeTask &&
+	if (*project.Options.IncludeTask &&
 		time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1) ||
-		(c.IncludeMyTasks &&
+		(*project.Options.IncludeMyTasks &&
 			issue.Fields.Assignee != nil &&
-			issue.Fields.Assignee.DisplayName == c.Connection.DisplayName) {
+			issue.Fields.Assignee.DisplayName == *c.Connection.DisplayName) {
 		output = append(output,
 			"- ***",
-			"- "+SimplifyStatus(c, issue)+" [[Jira Task]] [["+issue.Key+"]]")
+			"- "+SimplifyStatus(project, issue)+" [[Jira Task]] [["+issue.Key+"]]",
+			"  id:: "+deterministicGUID(issue.Key))
+
 		if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
 			output = append(output, "\tDEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
 				"\tSCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
@@ -303,7 +349,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 		}
 	}
 
-	if c.IncludeComments {
+	if *project.Options.IncludeComments {
 		fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue")
@@ -312,7 +358,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 			output = append(output, "- ### Comments")
 			for _, comment := range fetchedIssue.Fields.Comments.Comments {
 				nameText := comment.Author.DisplayName
-				if c.LinkNames {
+				if *project.Options.LinkNames {
 					nameText = "[[" + nameText + "]]"
 				}
 
@@ -331,7 +377,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 
 				output = append(output, "- "+nameText+" - Created: "+DateFormat(created)+" | Updated: "+DateFormat(updated))
 
-				lines, err := ParseJiraText(c, comment.Body, fetchedIssue)
+				lines, err := ParseJiraText(project, comment.Body, fetchedIssue)
 				if err != nil {
 					return errors.Wrap(err, "Failed in ParseJiraText")
 				}
@@ -345,7 +391,7 @@ func ProcessIssue(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project 
 	err = WritePage(issue.Key, []byte(strings.Join(output, "\n")))
 
 	if err == nil {
-		c.progress[project].IncrBy(1)
+		c.progress[*project.Key].IncrBy(1)
 	}
 
 	return err
@@ -416,25 +462,32 @@ func SaveAttachment(c *JiraConfig, a *jira.Attachment) (logseqPath string, err e
 	return
 }
 
-func SimplifyStatus(c *JiraConfig, i *jira.Issue) string {
-	for _, status := range c.Status.Done {
-		if i.Fields.Status.Name == status {
-			return "DONE"
+func SimplifyStatus(project *JiraProject, i *jira.Issue) string {
+
+	for _, matcher := range project.Options.Status.Match {
+		for _, m := range matcher.From {
+			if *m == i.Fields.Status.Name {
+				return *matcher.To
+			}
 		}
 	}
-	return "TODO"
+
+	return *project.Options.Status.Default
 }
 
 func (c *JiraConfig) createClient() (*jira.Client, error) {
 	tp := jira.BasicAuthTransport{
-		Username: c.Connection.Username,
-		APIToken: c.Connection.APIToken,
+		Username: *c.Connection.Username,
+		APIToken: *c.Connection.APIToken,
 	}
-	return jira.NewClient(c.Connection.BaseURL, tp.Client())
+	return jira.NewClient(*c.Connection.BaseURL, tp.Client())
 }
 
 // Modified from https://github.com/andygrunwald/go-jira/issues/55#issuecomment-676631140
-func GetIssues(c *JiraConfig, searchString string, project string, issues chan jira.Issue) (err error) {
+func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue) (err error) {
+
+	c := project.config
+
 	last := 0
 	newIssues := []*jira.Issue{}
 	for {
@@ -451,6 +504,9 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 			searchString,
 			opt,
 		})
+		if resp.StatusCode == 404 {
+			continue
+		}
 		if err != nil {
 			return errors.Wrap(err, "Failed in APIWrapper")
 		}
@@ -462,7 +518,7 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 			issues <- i
 		}
 		last = resp.StartAt + len(chunk)
-		c.progress[project].SetTotal(int64(last), false)
+		c.progress[*project.Key].SetTotal(int64(last), false)
 		if last >= total {
 			break
 		}
@@ -477,7 +533,7 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 			}
 		}
 		if !seen {
-			if knownIssues[ik].Fields.Project.Key == project {
+			if knownIssues[ik].Fields.Project.Key == *project.Key {
 				issues <- *knownIssues[ik]
 			}
 		}
@@ -491,9 +547,11 @@ func GetIssues(c *JiraConfig, searchString string, project string, issues chan j
 	return nil
 }
 
-func ParseJiraText(c *JiraConfig, input string, issue *jira.Issue) ([]string, error) {
+func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]string, error) {
 
 	var err error
+
+	c := project.config
 
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}
@@ -590,15 +648,15 @@ func ParseJiraText(c *JiraConfig, input string, issue *jira.Issue) ([]string, er
 					slog.Info("Empty accountID in line: " + lines[0])
 				}
 
-				displayName, err := FindUser(c, accountID)
+				displayName, err := FindUser(project, accountID)
 				if err != nil {
-					if c.SearchUsers {
+					if *project.Options.SearchUsers {
 						slog.Info(err.Error() + " - Can't find user, likely an authorization error, won't bother retrying.")
-						c.SearchUsers = false
+						*project.Options.SearchUsers = false
 					}
 					displayName = accountID
 				} else {
-					if c.LinkNames {
+					if *project.Options.LinkNames {
 						displayName = "[[" + displayName + "]]"
 					}
 				}
@@ -707,7 +765,10 @@ func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue
 
 }
 
-func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
+func GetWatchers(project *JiraProject, i *jira.Issue, watchers *[]string) error {
+
+	c := project.config
+
 	if len(*watchers) > 0 {
 		return nil
 	}
@@ -727,6 +788,10 @@ func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
 		o, _, err := APIWrapper(c, func(a []any) (output []any, resp *jira.Response, err error) {
 			output = make([]any, 1)
 			output[0], resp, err = c.client.Issue.GetWatchers(context.Background(), a[0].(string))
+			if resp == nil || resp.StatusCode == 404 {
+				delete(knownIssues, i.Key)
+				output = nil
+			}
 			return output, resp, errors.Wrap(err, "Couldn't get watchers for "+a[0].(string))
 		}, []any{
 			i.ID,
@@ -734,24 +799,26 @@ func GetWatchers(c *JiraConfig, i *jira.Issue, watchers *[]string) error {
 		if err != nil {
 			return errors.Wrap(err, "Failed in APIWrapper")
 		}
-		watchingUsers := o[0].(*[]jira.User)
+		if o != nil {
+			watchingUsers := o[0].(*[]jira.User)
 
-		for _, u := range *watchingUsers {
-			nameText := u.DisplayName
-			if c.LinkNames {
-				nameText = "[[" + nameText + "]]"
+			for _, u := range *watchingUsers {
+				nameText := u.DisplayName
+				if *project.Options.LinkNames {
+					nameText = "[[" + nameText + "]]"
+				}
+				*watchers = append(*watchers, nameText)
 			}
-			*watchers = append(*watchers, nameText)
-		}
 
-		jsonBytes, err := json.MarshalIndent(watchers, "", "  ")
-		if err != nil {
-			return errors.Wrap(err, "Failed in json.Marshal")
-		}
+			jsonBytes, err := json.MarshalIndent(watchers, "", "  ")
+			if err != nil {
+				return errors.Wrap(err, "Failed in json.Marshal")
+			}
 
-		err = WriteFile(cachedFilePath, jsonBytes)
-		if err != nil {
-			return errors.Wrap(err, "Failed in write file "+cachedFilePath)
+			err = WriteFile(cachedFilePath, jsonBytes)
+			if err != nil {
+				return errors.Wrap(err, "Failed in write file "+cachedFilePath)
+			}
 		}
 
 	} else if err != nil {
@@ -867,6 +934,10 @@ func APIWrapper(c *JiraConfig, f func([]any) ([]any, *jira.Response, error), i [
 		retry := false
 		jiraApiCalls.IncrBy(1)
 		output, resp, err = f(i)
+		if resp == nil && strings.Contains(err.Error(), "404") {
+			err = nil
+			return
+		}
 		if resp != nil {
 			body, errBody = io.ReadAll(resp.Body)
 			if errBody != nil {
@@ -918,6 +989,8 @@ func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
 		slog.Warn("API calls exhausted, sleeping until " + fmt.Sprint(resetTime))
 		time.Sleep(time.Until(resetTime))
 		slog.Warn("Waking up, API should be usable again, retrying last call.")
+	} else if resp.StatusCode == 404 {
+		slog.Warn("404 not found")
 	} else {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -929,7 +1002,10 @@ func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
 	return
 }
 
-func FindUser(c *JiraConfig, id string) (string, error) {
+func FindUser(project *JiraProject, id string) (string, error) {
+
+	c := project.config
+
 	usersLock.Lock()
 	defer usersLock.Unlock()
 
@@ -943,7 +1019,7 @@ func FindUser(c *JiraConfig, id string) (string, error) {
 			return users[id], nil
 		}
 	}
-	if !c.SearchUsers {
+	if !*project.Options.SearchUsers {
 		return id, errors.New("Cannot find given user")
 	}
 
@@ -977,11 +1053,101 @@ func FindUser(c *JiraConfig, id string) (string, error) {
 
 }
 
-func JiraTypeSubstitute(c *JiraConfig, issue *jira.Issue) string {
-	for _, pair := range c.Type {
-		if issue.Fields.Type.Description == pair.From {
-			return pair.To
+func JiraTypeSubstitute(project *JiraProject, issue *jira.Issue) string {
+	for _, pair := range project.Options.Type {
+		for _, m := range pair.From {
+			if issue.Fields.Type.Description == *m {
+				return *pair.To
+			}
 		}
 	}
 	return issue.Fields.Type.Description
+}
+
+func GetCustomFields(project *JiraProject, issue *jira.Issue) (customFields jira.CustomFields, err error) {
+
+	cachedFilePath := strings.Join([]string{config.CacheRoot, issue.Key, time.Time(issue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_custom_fields.json"
+
+	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
+
+	err = os.MkdirAll(dir, os.ModeDir)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to make cache directory "+dir)
+	}
+
+	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
+
+		// TODO - API Wrap
+		customFields, resp, err := project.config.client.Issue.GetCustomFields(context.Background(), issue.ID)
+
+		if resp.StatusCode == 404 {
+			delete(knownIssues, issue.Key)
+			return nil, nil
+		}
+
+		jiraApiCalls.IncrBy(1)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to get custom fields")
+		}
+
+		jsonBytes, err := json.MarshalIndent(customFields, "", "  ")
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed in json.Marshal")
+		}
+
+		err = WriteFile(cachedFilePath, jsonBytes)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed in write file "+cachedFilePath)
+		}
+
+	} else if err != nil {
+
+		return nil, errors.Wrap(err, cachedFilePath)
+
+	} else {
+
+		jsonFile, err := os.Open(cachedFilePath)
+
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to open file")
+		}
+
+		defer jsonFile.Close()
+
+		byteValue, _ := io.ReadAll(jsonFile)
+
+		err = json.Unmarshal(byteValue, &customFields)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to open file")
+		}
+
+		jiraCacheHits.IncrBy(1)
+
+	}
+
+	return
+}
+
+func TranslateCustomFields(project *JiraProject, issue *jira.Issue) (output []string, err error) {
+
+	customFields, err := GetCustomFields(project, issue)
+	if err != nil {
+		errors.Wrap(err, "Failed in GetCustomFields")
+	}
+
+	for _, customField := range project.Options.CustomFields {
+		val, ok := customFields[*customField.From]
+		if val != "" && val != "<nil>" && ok {
+			if customField.As != nil {
+				switch *customField.As {
+				case "date_sortable":
+					output = append(output, *customField.To+"_sortable:: "+strings.ReplaceAll(val, "-", ""))
+				}
+			} else {
+				output = append(output, *customField.To+":: "+val)
+			}
+		}
+
+	}
+	return
 }

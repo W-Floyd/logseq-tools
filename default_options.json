@@ -1,0 +1,62 @@
+{
+    "jira": {
+        "enabled": true,
+        "include_watchers": true,
+        "include_comments": true,
+        "exclude_from_graph": true,
+        "include_done": true,
+        "include_task": false,
+        "include_my_tasks": true,
+        "link_names": true,
+        "link_dates": false,
+        "search_users": false,
+        "status": {
+            "match": [
+                {
+                    "from": [
+                        "Done",
+                        "Past",
+                        "Audit",
+                        "Resolved",
+                        "Closed"
+                    ],
+                    "to": "DONE",
+                    "exclude": false
+                }
+            ],
+            "default": "TODO"
+        },
+        "type": [
+            {
+                "from": [
+                    "Fine-Grain Work-Item"
+                ],
+                "to": "Sub-Task"
+            },
+            {
+                "from": [
+                    "Objective-Based Work-Item with Duration of Days or Weeks"
+                ],
+                "to": "Sprint"
+            },
+            {
+                "from": [
+                    "Work-Item of Any Size"
+                ],
+                "to": "Ticket"
+            },
+            {
+                "from": [
+                    "Externally-Executed Placeholder Work-Item"
+                ],
+                "to": "Watch"
+            },
+            {
+                "from": [
+                    "Created by JIRA Software - do not edit or delete. Issue type for a big user story that needs to be broken down."
+                ],
+                "to": "Epic"
+            }
+        ]
+    }
+}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"dario.cat/mergo"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
@@ -33,6 +34,7 @@ type Config struct {
 			AccountID   string `json:"account_id"`   // Account ID to match
 			DisplayName string `json:"display_name"` // Display name to print in place
 		} `json:"users"`
+		Options JiraOptions `json:"options"`
 	} `json:"jira"`
 	Calendar struct {
 		Instances []*CalendarConfig `json:"instances"` // Calendar instances to process
@@ -58,6 +60,9 @@ var (
 	knownIssues                 = map[string]*jira.Issue{}
 	knownIssuePath              string
 	issueUrlMatchers            = []*regexp.Regexp{}
+	defaultOptions              = struct {
+		Jira JiraOptions `json:"jira"`
+	}{}
 )
 
 func init() {
@@ -88,6 +93,7 @@ func main() {
 	var err error
 
 	configFile := flag.String("config-path", "./config.json", "Config file to use")
+	defaultOptionsFile := flag.String("default-options-file", "./default_options.json", "Default options to use")
 
 	timeline = flag.Bool("timeline", false, "Whether to just parse timeline tags (into Markwhen)")
 	timelinePath = flag.String("timeline-path", "./timeline.mw", "Where to parse the timeline to")
@@ -135,11 +141,41 @@ func main() {
 	configRaw, err := os.ReadFile(*configFile)
 	if err != nil {
 		slog.Error(err.Error())
+		return
 	}
 
 	err = json.Unmarshal(configRaw, &config)
 	if err != nil {
+		if ute, ok := err.(*json.UnmarshalTypeError); ok {
+			fmt.Printf("UnmarshalTypeError %v - %v - %v\n", ute.Value, ute.Type, ute.Offset)
+		} else {
+			fmt.Println("Other error:", err)
+		}
 		slog.Error(err.Error())
+		return
+	}
+
+	optionsRaw, err := os.ReadFile(*defaultOptionsFile)
+	if err != nil {
+		slog.Error(err.Error())
+		return
+	}
+
+	err = json.Unmarshal(optionsRaw, &defaultOptions)
+	if err != nil {
+		if ute, ok := err.(*json.UnmarshalTypeError); ok {
+			fmt.Printf("UnmarshalTypeError %v - %v - %v\n", ute.Value, ute.Type, ute.Offset)
+		} else {
+			fmt.Println("Other error:", err)
+		}
+		slog.Error(err.Error())
+		return
+	}
+
+	err = mergo.Merge(&config.Jira.Options, defaultOptions.Jira, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+	if err != nil {
+		slog.Error(err.Error())
+		return
 	}
 
 	lastRunPath = strings.Join([]string{config.CacheRoot, "lastRun"}, "/") + ".json"
@@ -195,7 +231,7 @@ func main() {
 	// Issue links
 	for _, instance := range config.Jira.Instances {
 		for _, project := range instance.Projects {
-			urlPattern := regexp.QuoteMeta(instance.Connection.BaseURL) + `browse/(` + regexp.QuoteMeta(project) + `-[0-9]+)`
+			urlPattern := regexp.QuoteMeta(*instance.Connection.BaseURL) + `browse/(` + regexp.QuoteMeta(*project.Key) + `-[0-9]+)`
 			matcher := ""
 			for _, pair := range [][2]string{{`[`, `]`}, {`(`, `)`}} {
 				start := regexp.QuoteMeta(pair[0])
@@ -238,7 +274,8 @@ func main() {
 				fmt.Printf("%+s:%d\n", f, f)
 			}
 		}
-		slog.Error(err.Error())
+		slog.Error("Failed in instance.Process: " + err.Error())
+		return
 	}
 	if *timeline {
 		err = WriteTimeline()
@@ -246,6 +283,7 @@ func main() {
 
 	if err != nil {
 		slog.Error("Failed in WriteTimeline: " + err.Error())
+		return
 	}
 
 	////

@@ -137,7 +137,7 @@ func (g *GroupTree) GetTag() string {
 
 func (e Event) MarkwhenLineItem() string {
 	format := "2006-01-02"
-	return e.Start.Format(format) + " / " + e.End.Format(format) + ": [" + e.Title + "](" + e.c.Connection.BaseURL + "browse/" + e.issue.Key + ")"
+	return e.Start.Format(format) + " / " + e.End.Format(format) + ": [" + e.Title + "](" + *e.c.Connection.BaseURL + "browse/" + e.issue.Key + ")"
 }
 
 func (e Event) GetTags() []string {
@@ -158,7 +158,7 @@ func (m Milestone) GetIssue() *jira.Issue {
 
 func (m Milestone) MarkwhenLineItem() string {
 	format := "2006-01-02"
-	return m.Date.Format(format) + ": [" + m.Title + "](" + m.c.Connection.BaseURL + "browse/" + m.issue.Key + ")"
+	return m.Date.Format(format) + ": [" + m.Title + "](" + *m.c.Connection.BaseURL + "browse/" + m.issue.Key + ")"
 }
 
 func (m Milestone) GetTags() []string {
@@ -169,8 +169,10 @@ func (m Milestone) GetEarliestDate() time.Time {
 	return m.Date
 }
 
-func ProcessTimeline(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, project string) (err error) {
+func ProcessTimeline(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (err error) {
 	var fetchedIssue *jira.Issue
+
+	c := project.config
 
 	fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
 	if err != nil {
@@ -198,7 +200,7 @@ func ProcessTimeline(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 				for _, match := range matchReal {
 					f, ok := tagFunc[match]
 					if ok {
-						f(c, fetchedIssue, matchReal, listTagFuncs())
+						f(project, fetchedIssue, matchReal, listTagFuncs())
 					}
 				}
 			}
@@ -208,16 +210,16 @@ func ProcessTimeline(wg *errgroup.Group, c *JiraConfig, issue *jira.Issue, proje
 		}
 	}
 
-	c.progress[project].IncrBy(1)
+	c.progress[*project.Key].IncrBy(1)
 
 	return
 
 }
 
-var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error = map[string]func(*JiraConfig, *jira.Issue, []string, []string) error{
-	"Event": func(c *JiraConfig, issue *jira.Issue, matches []string, reservedTags []string) error {
+var tagFunc map[string]func(*JiraProject, *jira.Issue, []string, []string) error = map[string]func(*JiraProject, *jira.Issue, []string, []string) error{
+	"Event": func(project *JiraProject, issue *jira.Issue, matches []string, reservedTags []string) error {
 
-		startTime, err := getStartDate(c, issue)
+		startTime, err := getStartDate(project, issue)
 		if err != nil {
 			slog.Warn("Cannot add " + issue.Key + " as event based on missing start date - " + err.Error())
 			return nil
@@ -235,7 +237,7 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 			Start: startTime,
 			End:   time.Time(issue.Fields.Duedate),
 			Tags:  filterTags(matches, reservedTags),
-			c:     c,
+			c:     project.config,
 			issue: issue,
 		}
 
@@ -243,9 +245,9 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 		events.mu.Unlock()
 		return nil
 	},
-	"Milestone/Start": func(c *JiraConfig, issue *jira.Issue, matches []string, reservedTags []string) (err error) {
+	"Milestone/Start": func(project *JiraProject, issue *jira.Issue, matches []string, reservedTags []string) (err error) {
 
-		startTime, err := getStartDate(c, issue)
+		startTime, err := getStartDate(project, issue)
 		if err != nil {
 			slog.Warn("Cannot add " + issue.Key + " as milestone base on start date - " + err.Error())
 		}
@@ -255,13 +257,13 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 			Title: issue.Fields.Summary,
 			Date:  startTime,
 			Tags:  filterTags(matches, reservedTags),
-			c:     c,
+			c:     project.config,
 			issue: issue,
 		})
 		milestones.mu.Unlock()
 		return
 	},
-	"Milestone/End": func(c *JiraConfig, issue *jira.Issue, matches []string, reservedTags []string) error {
+	"Milestone/End": func(project *JiraProject, issue *jira.Issue, matches []string, reservedTags []string) error {
 
 		if time.Time(issue.Fields.Duedate).Compare(time.Time{}) != 1 {
 			slog.Warn("No due date for " + issue.Key + ", cannot add as milestone base on end date")
@@ -272,7 +274,7 @@ var tagFunc map[string]func(*JiraConfig, *jira.Issue, []string, []string) error 
 			Title: issue.Fields.Summary,
 			Date:  time.Time(issue.Fields.Duedate),
 			Tags:  filterTags(matches, reservedTags),
-			c:     c,
+			c:     project.config,
 			issue: issue,
 		})
 		milestones.mu.Unlock()
@@ -438,15 +440,24 @@ func (g *GroupTree) Print() (output []string) {
 	return
 }
 
-func getStartDate(c *JiraConfig, issue *jira.Issue) (t time.Time, err error) {
+func getStartDate(project *JiraProject, issue *jira.Issue) (t time.Time, err error) {
+
+	c := project.config
 
 	customFields, _, err := c.client.Issue.GetCustomFields(context.Background(), issue.ID)
 	if err != nil {
 		return
 	}
 
-	start, ok := customFields[c.StartDateField]
-	if start == "" || !ok {
+	start := ""
+
+	for _, customField := range project.Options.CustomFields {
+		if *customField.To == "date_start" {
+			start = customFields[*customField.From]
+		}
+	}
+
+	if start == "" {
 		return time.Time{}, errors.New("No start date defined for " + issue.Key)
 	}
 
