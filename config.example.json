@@ -1,18 +1,59 @@
 {
-    "logseq_root": "../Notes",
+    "logseq_root": "../notes",
+    "cache_root": "./cache",
     "jira": {
+        "users": [
+            {
+                "account_id": "xxxxxxxxxxxxxxxxxxxxxxxx",
+                "display_name": "John Doe"
+            },
+            {
+                "account_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+                "display_name": "Jane Doe"
+            }
+        ],
         "instances": [
             {
-                "enabled": true,
-                "include_watchers": true,
-                "include_comments": true,
-                "exclude_from_graph": true,
-                "include_done": true,
-                "include_task": false,
-                "include_my_tasks": true,
-                "link_names": false,
-                "link_dates": false,
-                "search_users": false,
+                "options": {
+                    "enabled": true,
+                    "include_watchers": true,
+                    "include_comments": true,
+                    "exclude_from_graph": true,
+                    "include_done": true,
+                    "include_task": false,
+                    "include_my_tasks": true,
+                    "link_names": true,
+                    "link_dates": false,
+                    "search_users": false,
+                    "status": {
+                        "match": [
+                            {
+                                "from": [
+                                    "Done",
+                                    "Closed"
+                                ],
+                                "to": "DONE",
+                                "exclude": false
+                            }
+                        ],
+                        "default": "TODO"
+                    },
+                    "type": [
+                        {
+                            "from": [
+                                "Fine-Grain Work-Item"
+                            ],
+                            "to": "Sub-Task"
+                        }
+                    ],
+                    "custom_fields": [
+                        {
+                            "from": "customfield_10015",
+                            "to": "date_start",
+                            "as": "date_sortable"
+                        }
+                    ]
+                },
                 "connection": {
                     "base_url": "https://mycompany.atlassian.net/",
                     "username": "username@email.com",
@@ -20,17 +61,23 @@
                     "api_token": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
                     "parallel": 8
                 },
-                "status": {
-                    "done": [
-                        "Done",
-                        "Past"
-                    ]
-                },
                 "projects": [
-                    "XXXXX",
-                    "XXXXX"
-                ],
-                "actions": {}
+                    {
+                        "key": "PKEY1"
+                    },
+                    {
+                        "key": "PKEY2",
+                        "options": {
+                            "custom_fields": [
+                                {
+                                    "from": "customfield_10054",
+                                    "to": "date_due_baseline",
+                                    "as": "date_sortable"
+                                }
+                            ]
+                        }
+                    }
+                ]
             }
         ]
     },
@@ -40,7 +87,17 @@
                 "enabled": true,
                 "title": "Outlook",
                 "ics_url": "https://outlook.office365.com/owa/calendar/.../calendar.ics",
-                "update_past": false
+                "all_events_done": true,
+                "exclusions": {
+                    "max_duration": {
+                        "length_hours": 8,
+                        "enabled": true
+                    },
+                    "titles": [
+                        "Focus Day. No Scheduled Meetings"
+                    ],
+                    "past_dates": true
+                }
             }
         ]
     }
