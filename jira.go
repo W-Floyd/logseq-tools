@@ -556,7 +556,7 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}
 
-	imageMatcher := `(?U)(!\[\]\()([^\)]+)(\))`
+	imageMatcher := `(?U)(!\[\]\()([^\)]+)\)`
 
 	re := regexp.MustCompile(imageMatcher)
 
@@ -592,7 +592,7 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 
 				l = strings.ReplaceAll(l, filename, imageReplacements[filename])
 
-				l = re.ReplaceAllString(l, `![`+imageReplacements[filename]+`]($2)$3`)
+				l = re.ReplaceAllString(l, `![`+imageReplacements[filename]+`]($2)`)
 			}
 
 		}
