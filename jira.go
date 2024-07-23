@@ -63,6 +63,11 @@ type JiraOptions struct {
 	LinkDates        *bool `json:"link_dates"`         // Whether to [[link]] dates
 	SearchUsers      *bool `json:"search_users"`       // Whether to search users - may not be possible due to permissions
 
+	Paths struct {
+		LogseqRoot string `json:"logseq_root"`
+		CacheRoot  string `json:"cache_root"`
+	} `json:"paths"`
+
 	CustomFields []struct {
 		From *string `json:"from"`
 		To   *string `json:"to"`
@@ -295,7 +300,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 	output = append(output, customFields...)
 
-	fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
+	fetchedIssue, err = GetIssue(project, issue, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in GetIssue")
 	}
@@ -350,7 +355,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 	}
 
 	if *project.Options.IncludeComments {
-		fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
+		fetchedIssue, err = GetIssue(project, issue, fetchedIssue)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue")
 		}
@@ -398,12 +403,14 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 }
 
-func SaveAttachment(c *JiraConfig, a *jira.Attachment) (logseqPath string, err error) {
+func SaveAttachment(project *JiraProject, a *jira.Attachment) (logseqPath string, err error) {
+
+	c := project.config
 
 	filename := "assets/jira/jira_" + a.ID + filepath.Ext(a.Filename)
 
 	logseqPath = "../" + filename
-	filePath := config.LogseqRoot + "/" + filename
+	filePath := project.Options.Paths.LogseqRoot + "/" + filename
 
 	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
 
@@ -551,8 +558,6 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 
 	var err error
 
-	c := project.config
-
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}
 
@@ -574,7 +579,7 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 					found := false
 					for _, attachment := range issue.Fields.Attachments {
 						if attachment.Filename == filename {
-							filepath, err = SaveAttachment(c, attachment)
+							filepath, err = SaveAttachment(project, attachment)
 							if err != nil {
 								return nil, errors.Wrap(err, "Failed to save attachment "+attachment.ID)
 							}
@@ -694,9 +699,11 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 	return
 }
 
-func GetIssue(c *JiraConfig, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
+func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
 
-	cachedFilePath := strings.Join([]string{config.CacheRoot, sparseIssue.Key, time.Time(sparseIssue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + ".json"
+	c := project.config
+
+	cachedFilePath := strings.Join([]string{project.Options.Paths.CacheRoot, sparseIssue.Key, time.Time(sparseIssue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + ".json"
 
 	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
 
@@ -773,7 +780,7 @@ func GetWatchers(project *JiraProject, i *jira.Issue, watchers *[]string) error 
 		return nil
 	}
 
-	cachedFilePath := strings.Join([]string{config.CacheRoot, i.Key, time.Time(i.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_watchers.json"
+	cachedFilePath := strings.Join([]string{project.Options.Paths.CacheRoot, i.Key, time.Time(i.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_watchers.json"
 
 	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
 
@@ -1066,7 +1073,7 @@ func JiraTypeSubstitute(project *JiraProject, issue *jira.Issue) string {
 
 func GetCustomFields(project *JiraProject, issue *jira.Issue) (customFields jira.CustomFields, err error) {
 
-	cachedFilePath := strings.Join([]string{config.CacheRoot, issue.Key, time.Time(issue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_custom_fields.json"
+	cachedFilePath := strings.Join([]string{project.Options.Paths.CacheRoot, issue.Key, time.Time(issue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_custom_fields.json"
 
 	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
 

@@ -1,6 +1,10 @@
 {
     "jira": {
         "enabled": true,
+        "paths": {
+            "logseq_root": "../notes",
+            "cache_root": "./cache"
+        },
         "include_watchers": true,
         "include_comments": true,
         "exclude_from_graph": true,

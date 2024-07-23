@@ -174,7 +174,7 @@ func ProcessTimeline(wg *errgroup.Group, issue *jira.Issue, project *JiraProject
 
 	c := project.config
 
-	fetchedIssue, err = GetIssue(c, issue, fetchedIssue)
+	fetchedIssue, err = GetIssue(project, issue, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in GetIssue")
 	}

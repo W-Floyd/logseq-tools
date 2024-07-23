@@ -26,9 +26,7 @@ import (
 )
 
 type Config struct {
-	LogseqRoot string `json:"logseq_root"`
-	CacheRoot  string `json:"cache_root"`
-	Jira       struct {
+	Jira struct {
 		Instances []*JiraConfig `json:"instances"` // Jira instances to process
 		Users     []struct {
 			AccountID   string `json:"account_id"`   // Account ID to match
@@ -178,7 +176,7 @@ func main() {
 		return
 	}
 
-	lastRunPath = strings.Join([]string{config.CacheRoot, "lastRun"}, "/") + ".json"
+	lastRunPath = strings.Join([]string{config.Jira.Options.Paths.CacheRoot, "lastRun"}, "/") + ".json"
 
 	if *recent {
 
@@ -201,7 +199,7 @@ func main() {
 		}
 	}
 
-	knownIssuePath = strings.Join([]string{config.CacheRoot, "knownIssues"}, "/") + ".json"
+	knownIssuePath = strings.Join([]string{config.Jira.Options.Paths.CacheRoot, "knownIssues"}, "/") + ".json"
 
 	if !*ignoreCache {
 
@@ -339,7 +337,7 @@ func main() {
 
 func WritePage(title string, contents []byte) error {
 
-	return WriteFile(path.Join(config.LogseqRoot, "pages", "jira", PageNameToFileName(title)+".md"), contents)
+	return WriteFile(path.Join(config.Jira.Options.Paths.LogseqRoot, "pages", "jira", PageNameToFileName(title)+".md"), contents)
 
 }
 
