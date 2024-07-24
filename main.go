@@ -262,7 +262,7 @@ func main() {
 	err = errs.Wait()
 
 	if jiraApiCalls.Current() > 0 && !*timeline {
-		IssueMap()
+		WriteIssueMap()
 		slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
 	}
 
@@ -281,6 +281,14 @@ func main() {
 
 	if err != nil {
 		slog.Error("Failed in WriteTimeline: " + err.Error())
+		return
+	}
+
+	////
+
+	err = config.ProcessTables()
+	if err != nil {
+		slog.Error("Failed in ProcessTables: " + err.Error())
 		return
 	}
 

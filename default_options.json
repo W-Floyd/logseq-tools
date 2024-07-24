@@ -30,6 +30,11 @@
             ],
             "default": "TODO"
         },
+        "outputs": {
+            "logseq": {
+                "enabled": true
+            }
+        },
         "type": [
             {
                 "from": [

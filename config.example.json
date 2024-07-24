@@ -68,6 +68,12 @@
                     {
                         "key": "PKEY2",
                         "options": {
+                            "outputs": {
+                                "table": {
+                                    "enabled": true,
+                                    "depth": 2
+                                }
+                            },
                             "custom_fields": [
                                 {
                                     "from": "customfield_10054",

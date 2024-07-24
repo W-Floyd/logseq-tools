@@ -51,6 +51,10 @@ type JiraProject struct {
 	config  *JiraConfig // Config for reference
 }
 
+type OutputFormat struct {
+	Enabled *bool
+}
+
 type JiraOptions struct {
 	Enabled          *bool `json:"enabled"`            // Whether to process this Jira project
 	IncludeWatchers  *bool `json:"include_watchers"`   // This can be slow, so you may want to disable it
@@ -67,6 +71,11 @@ type JiraOptions struct {
 		LogseqRoot string `json:"logseq_root"`
 		CacheRoot  string `json:"cache_root"`
 	} `json:"paths"`
+
+	Outputs struct {
+		Logseq *OutputFormat
+		Table  *OutputFormat
+	} `json:"outputs"`
 
 	CustomFields []struct {
 		From *string `json:"from"`
@@ -876,9 +885,9 @@ func LogseqTitle(issue *jira.Issue) string {
 	return issue.Key + " | " + LogseqTransform(issue.Fields.Summary)
 }
 
-func IssueMap() error {
-	output := []string{}
-
+func IssueMap() (parents map[string]*string, children map[string][]string) {
+	parents = map[string]*string{}
+	children = map[string][]string{}
 	for key, issue := range knownIssues {
 
 		if _, ok := children[key]; !ok {
@@ -891,6 +900,13 @@ func IssueMap() error {
 			parents[key] = nil
 		}
 	}
+	return
+}
+
+func WriteIssueMap() error {
+	output := []string{}
+
+	IssueMap()
 
 	topLevel := []string{}
 
