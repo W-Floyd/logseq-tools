@@ -80,7 +80,7 @@ type JiraOptions struct {
 	CustomFields []struct {
 		From *string `json:"from"`
 		To   *string `json:"to"`
-		As   *string `json:"date"`
+		As   *string `json:"as"`
 	} `json:"custom_fields"`
 
 	Status struct {
@@ -302,17 +302,17 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		output = append(output, "reporter:: "+nameText)
 	}
 
-	customFields, err := TranslateCustomFields(project, issue)
+	fetchedIssue, err = GetIssue(project, issue, fetchedIssue)
+	if err != nil {
+		return errors.Wrap(err, "Failed in GetIssue")
+	}
+
+	customFields, err := TranslateCustomFields(project, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in TranslateCustomFields")
 	}
 
 	output = append(output, customFields...)
-
-	fetchedIssue, err = GetIssue(project, issue, fetchedIssue)
-	if err != nil {
-		return errors.Wrap(err, "Failed in GetIssue")
-	}
 
 	line, err := ParseJiraText(project, issue.Fields.Description, fetchedIssue)
 	if err != nil {
