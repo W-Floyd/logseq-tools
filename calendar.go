@@ -61,23 +61,28 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 
 	cal.Parse()
 
-	slices.SortFunc(cal.Events, func(a, b gocal.Event) int {
-		comp := a.Start.Compare(*b.Start)
-		if comp != 0 {
-			return comp
+	calendarEvents := cal.Events
+
+	slices.SortStableFunc(calendarEvents, func(a, b gocal.Event) int {
+		funcs := [](func() int){
+			func() int { return a.Start.Compare(*b.Start) },
+			func() int { return a.End.Compare(*b.End) },
+			func() int { return strings.Compare(a.Summary, b.Summary) },
 		}
-		comp = a.End.Compare(*b.End)
-		if comp != 0 {
-			return comp
+		for _, f := range funcs {
+			comp := f()
+			if comp != 0 {
+				return comp
+			}
 		}
-		return strings.Compare(a.Summary, b.Summary)
+		return 0
 	})
 
 	days := map[string][]string{}
 
 	dateFormat := "2006_01_02"
 
-	for _, e := range cal.Events {
+	for _, e := range calendarEvents {
 
 		duration := e.End.Sub(*e.Start)
 
@@ -114,7 +119,7 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 		}
 
 		text = append(text,
-			"  SCHEDULED: <"+e.Start.Format("2006-01-02 Mon 15:04")+">",
+			"  SCHEDULED: <"+e.Start.Local().Format("2006-01-02 Mon 15:04")+">",
 			"  :AGENDA:",
 			"  estimated: "+strconv.Itoa(
 				durationMinutes,
