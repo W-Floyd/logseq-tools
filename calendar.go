@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/apognu/gocal"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
@@ -118,14 +120,28 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 			}
 		}
 
+		baseId := e.Uid
+
+		recurranceId := *e.Start
+
+		if e.RecurrenceID != "" {
+			recurranceId, err = time.Parse("20060102T150405", e.RecurrenceID)
+			if err != nil {
+				return errors.Wrap(err, "Failed in time.Parse")
+			}
+		}
+
+		slog.Debug(e.Summary + " - " + baseId + " " + recurranceId.Format("20060102T150405"))
+
 		text = append(text,
 			"  SCHEDULED: <"+e.Start.Local().Format("2006-01-02 Mon 15:04")+">",
+			"  status:: "+e.Status,
+			"  id:: "+deterministicGUID(baseId+recurranceId.Format("20060102T150405")),
 			"  :AGENDA:",
 			"  estimated: "+strconv.Itoa(
 				durationMinutes,
 			)+"m",
 			"  :END:",
-			"  status:: "+e.Status,
 		)
 
 		if e.Organizer != nil {
