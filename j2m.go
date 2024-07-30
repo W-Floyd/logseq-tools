@@ -123,7 +123,7 @@ func JiraToMD(str string) string {
 			repl: "<$1>",
 		},
 		{ // Images
-			re:   regexp.MustCompile(`!(.+)!`),
+			re:   regexp.MustCompile(`!([^ ].+)!`),
 			repl: "![]($1)",
 		},
 		{ // Named Links
