@@ -102,8 +102,22 @@
                     "titles": [
                         "Focus Day. No Scheduled Meetings"
                     ],
-                    "past_dates": true
-                }
+                    "past_dates": false
+                },
+                "timezones": [
+                    {
+                        "from": "Central Standard Time",
+                        "to": "US/Central"
+                    },
+                    {
+                        "from": "Mountain Standard Time",
+                        "to": "US/Mountain"
+                    },
+                    {
+                        "from": "Eastern Standard Time",
+                        "to": "US/Eastern"
+                    }
+                ]
             }
         ]
     }

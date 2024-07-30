@@ -30,6 +30,10 @@ type CalendarConfig struct {
 		Titles    []string `json:"titles"`
 		PastDates bool     `json:"past_dates"`
 	} `json:"exclusions"`
+	TimeZones []struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	} `json:"timezones"`
 }
 
 func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
@@ -43,10 +47,10 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 		return errors.Wrap(err, "Failed in http.Get")
 	}
 
-	var tzMapping = map[string]string{
-		"Central Standard Time":  "US/Central",
-		"Mountain Standard Time": "US/Mountain",
-		"Eastern Standard Time":  "US/Eastern",
+	var tzMapping = map[string]string{}
+
+	for _, tz := range c.TimeZones {
+		tzMapping[tz.From] = tz.To
 	}
 
 	gocal.SetTZMapper(func(s string) (*time.Location, error) {
