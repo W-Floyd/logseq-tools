@@ -726,7 +726,7 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 		return nil, nil, errors.Wrap(err, "Failed to make cache directory "+dir)
 	}
 
-	jsonByteValue := []byte{}
+	var jsonByteValue []byte
 
 	if _, err = os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
 
