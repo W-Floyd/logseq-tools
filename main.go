@@ -262,7 +262,11 @@ func main() {
 	err = errs.Wait()
 
 	if jiraApiCalls.Current() > 0 && !*timeline {
-		WriteIssueMap()
+		err = WriteIssueMap()
+		if err != nil {
+			slog.Error("Failed in WriteIssueMap: " + err.Error())
+			return
+		}
 		slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
 	}
 
