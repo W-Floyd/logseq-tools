@@ -271,7 +271,9 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 		slices.Sort(*watchers)
 
-		output = append(output, "watchers:: "+strings.Join(*watchers, ", "))
+		if len(*watchers) > 0 {
+			output = append(output, "watchers:: "+strings.Join(*watchers, ", "))
+		}
 	}
 
 	if issue.Fields.Assignee != nil {
