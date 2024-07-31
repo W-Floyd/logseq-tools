@@ -4,6 +4,7 @@ go 1.22.2
 
 require (
 	dario.cat/mergo v1.0.0
+	github.com/Jeffail/gabs/v2 v2.7.0
 	github.com/MagicalTux/natsort v1.0.1
 	github.com/andygrunwald/go-jira/v2 v2.0.0-20240719054840-2aa3adf50836
 	github.com/apognu/gocal v0.9.0
@@ -14,7 +15,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/segmentio/fasthash v1.0.3
 	github.com/tj/go-naturaldate v1.3.0
-	github.com/vbauerster/mpb/v8 v8.7.4
+	github.com/vbauerster/mpb/v8 v8.7.5
 	github.com/xuri/excelize/v2 v2.8.1
 	github.com/zeebo/xxh3 v1.0.2
 	golang.org/x/sync v0.7.0

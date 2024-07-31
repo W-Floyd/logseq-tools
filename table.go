@@ -144,7 +144,7 @@ func (c Config) ProcessTables() error {
 						dateEnd = time.Time(knownIssues[childIssue].Fields.Duedate).Format("2006/01/02")
 					}
 
-					customFields, err := GetCustomFields(project, knownIssues[childIssue])
+					_, customFields, err := GetIssue(project, knownIssues[childIssue], nil)
 					if err != nil {
 						return err
 					}

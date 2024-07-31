@@ -19,6 +19,7 @@ import (
 	"log/slog"
 
 	"dario.cat/mergo"
+	"github.com/Jeffail/gabs/v2"
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/pkg/errors"
@@ -302,7 +303,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		output = append(output, "reporter:: "+nameText)
 	}
 
-	fetchedIssue, err = GetIssue(project, issue, fetchedIssue)
+	fetchedIssue, _, err = GetIssue(project, issue, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in GetIssue")
 	}
@@ -364,7 +365,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 	}
 
 	if *project.Options.IncludeComments {
-		fetchedIssue, err = GetIssue(project, issue, fetchedIssue)
+		fetchedIssue, _, err = GetIssue(project, issue, fetchedIssue)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue")
 		}
@@ -708,7 +709,9 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 	return
 }
 
-func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, err error) {
+func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, customFields jira.CustomFields, err error) {
+
+	customFields = map[string]string{}
 
 	c := project.config
 
@@ -718,8 +721,10 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 
 	err = os.MkdirAll(dir, os.ModeDir)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to make cache directory "+dir)
+		return nil, nil, errors.Wrap(err, "Failed to make cache directory "+dir)
 	}
+
+	jsonByteValue := []byte{}
 
 	if _, err = os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
 
@@ -734,7 +739,7 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 				sparseIssue.Key,
 			})
 			if err != nil {
-				return nil, errors.Wrap(err, "Failed in APIWrapper")
+				return nil, nil, errors.Wrap(err, "Failed in APIWrapper")
 			}
 			fullIssue = o[0].(*jira.Issue)
 
@@ -742,42 +747,54 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 			fullIssue = fullIssueCheck
 		}
 
-		jsonBytes, err := json.MarshalIndent(fullIssue, "", "  ")
+		jsonByteValue, err = json.MarshalIndent(fullIssue, "", "  ")
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed in json.Marshal")
+			return nil, nil, errors.Wrap(err, "Failed in json.Marshal")
 		}
 
-		err = WriteFile(cachedFilePath, jsonBytes)
+		err = WriteFile(cachedFilePath, jsonByteValue)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed in write file "+cachedFilePath)
+			return nil, nil, errors.Wrap(err, "Failed in write file "+cachedFilePath)
 		}
 
 	} else if err != nil {
 
-		return nil, errors.Wrap(err, cachedFilePath)
+		return nil, nil, errors.Wrap(err, cachedFilePath)
 
 	} else {
 
 		jsonFile, err := os.Open(cachedFilePath)
 
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to open file")
+			return nil, nil, errors.Wrap(err, "Failed to open file")
 		}
 
 		defer jsonFile.Close()
 
-		byteValue, _ := io.ReadAll(jsonFile)
+		jsonByteValue, _ = io.ReadAll(jsonFile)
 
-		err = json.Unmarshal(byteValue, &fullIssue)
+		err = json.Unmarshal(jsonByteValue, &fullIssue)
 		if err != nil {
-			return nil, errors.Wrap(err, "Failed to unmarshal file")
+			return nil, nil, errors.Wrap(err, "Failed to unmarshal file")
 		}
 
 		jiraCacheHits.IncrBy(1)
 
 	}
 
-	return fullIssue, nil
+	jsonParsed, err := gabs.ParseJSON(jsonByteValue)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "Failed to unmarshal raw json: "+string(jsonByteValue))
+	}
+
+	for _, customField := range project.Options.CustomFields {
+		val, ok := jsonParsed.Search("fields", *customField.From).Data().(string)
+		if val != "" && val != "<nil>" && ok {
+			customFields[*customField.From] = val
+		}
+	}
+
+	return fullIssue, customFields, nil
 
 }
 
@@ -1087,73 +1104,9 @@ func JiraTypeSubstitute(project *JiraProject, issue *jira.Issue) string {
 	return issue.Fields.Type.Description
 }
 
-func GetCustomFields(project *JiraProject, issue *jira.Issue) (customFields jira.CustomFields, err error) {
-
-	cachedFilePath := strings.Join([]string{project.Options.Paths.CacheRoot, issue.Key, time.Time(issue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_custom_fields.json"
-
-	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
-
-	err = os.MkdirAll(dir, os.ModeDir)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to make cache directory "+dir)
-	}
-
-	if _, err := os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
-
-		// TODO - API Wrap
-		customFields, resp, err := project.config.client.Issue.GetCustomFields(context.Background(), issue.ID)
-
-		if resp.StatusCode == 404 {
-			delete(knownIssues, issue.Key)
-			return nil, nil
-		}
-
-		jiraApiCalls.IncrBy(1)
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to get custom fields")
-		}
-
-		jsonBytes, err := json.MarshalIndent(customFields, "", "  ")
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed in json.Marshal")
-		}
-
-		err = WriteFile(cachedFilePath, jsonBytes)
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed in write file "+cachedFilePath)
-		}
-
-	} else if err != nil {
-
-		return nil, errors.Wrap(err, cachedFilePath)
-
-	} else {
-
-		jsonFile, err := os.Open(cachedFilePath)
-
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to open file")
-		}
-
-		defer jsonFile.Close()
-
-		byteValue, _ := io.ReadAll(jsonFile)
-
-		err = json.Unmarshal(byteValue, &customFields)
-		if err != nil {
-			return nil, errors.Wrap(err, "Failed to open file")
-		}
-
-		jiraCacheHits.IncrBy(1)
-
-	}
-
-	return
-}
-
 func TranslateCustomFields(project *JiraProject, issue *jira.Issue) (output []string, err error) {
 
-	customFields, err := GetCustomFields(project, issue)
+	_, customFields, err := GetIssue(project, issue, nil)
 	if err != nil {
 		errors.Wrap(err, "Failed in GetCustomFields")
 	}
