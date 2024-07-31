@@ -254,12 +254,6 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		"status-simple:: " + SimplifyStatus(project, issue),
 	}
 
-	if *project.Options.LinkDates {
-		output = append(output, "date-created:: [["+DateFormat(time.Time(issue.Fields.Created))+"]]")
-	}
-
-	output = append(output, "date-created-sortable:: "+time.Time(issue.Fields.Created).Format("20060102"))
-
 	if issue.Fields.Parent != nil {
 		output = append(output, "parent:: [["+issue.Fields.Parent.Key+"]]")
 	}
@@ -278,13 +272,6 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		slices.Sort(*watchers)
 
 		output = append(output, "watchers:: "+strings.Join(*watchers, ", "))
-	}
-
-	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
-		if *project.Options.LinkDates {
-			output = append(output, "date_due:: [["+DateFormat(time.Time(issue.Fields.Duedate))+"]]")
-		}
-		output = append(output, "date_due_sortable:: "+time.Time(issue.Fields.Duedate).Format("20060102"))
 	}
 
 	if issue.Fields.Assignee != nil {
@@ -306,6 +293,19 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 	fetchedIssue, _, err = GetIssue(project, issue, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in GetIssue")
+	}
+
+	if *project.Options.LinkDates {
+		output = append(output, "date-created:: [["+DateFormat(time.Time(issue.Fields.Created))+"]]")
+	}
+
+	output = append(output, "date-created-sortable:: "+time.Time(issue.Fields.Created).Format("20060102"))
+
+	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
+		if *project.Options.LinkDates {
+			output = append(output, "date-due:: [["+DateFormat(time.Time(issue.Fields.Duedate))+"]]")
+		}
+		output = append(output, "date-due-sortable:: "+time.Time(issue.Fields.Duedate).Format("20060102"))
 	}
 
 	customFields, err := TranslateCustomFields(project, fetchedIssue)
@@ -1117,7 +1117,14 @@ func TranslateCustomFields(project *JiraProject, issue *jira.Issue) (output []st
 			if customField.As != nil {
 				switch *customField.As {
 				case "date_sortable":
-					output = append(output, *customField.To+"_sortable:: "+strings.ReplaceAll(val, "-", ""))
+					if *project.Options.LinkDates {
+						date, err := time.Parse("2006-01-02", val)
+						if err != nil {
+							errors.Wrap(err, "Failed in time.Parse")
+						}
+						output = append(output, *customField.To+":: [["+DateFormat(date)+"]]")
+					}
+					output = append(output, *customField.To+"-sortable:: "+strings.ReplaceAll(val, "-", ""))
 				}
 			} else {
 				output = append(output, *customField.To+":: "+val)

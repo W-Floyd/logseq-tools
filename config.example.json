@@ -49,7 +49,7 @@
                     "custom_fields": [
                         {
                             "from": "customfield_10015",
-                            "to": "date_start",
+                            "to": "date-start",
                             "as": "date_sortable"
                         }
                     ]
