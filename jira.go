@@ -507,6 +507,16 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 
 	c := project.config
 
+	totalIssuesForProject := 0
+
+	for _, i := range knownIssues {
+		if i.Fields.Project.Key == *project.Key {
+			totalIssuesForProject += 1
+		}
+	}
+
+	c.progress[*project.Key].SetTotal(int64(totalIssuesForProject), false)
+
 	last := 0
 	newIssues := []*jira.Issue{}
 	for {
@@ -537,7 +547,7 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 			issues <- i
 		}
 		last = resp.StartAt + len(chunk)
-		c.progress[*project.Key].SetTotal(int64(last), false)
+
 		if last >= total {
 			break
 		}
@@ -555,6 +565,9 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 			if knownIssues[ik].Fields.Project.Key == *project.Key {
 				issues <- *knownIssues[ik]
 			}
+		} else {
+			totalIssuesForProject += 1
+			c.progress[*project.Key].SetTotal(int64(totalIssuesForProject), false)
 		}
 	}
 
