@@ -543,6 +543,8 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 
 		total := resp.Total
 		for _, i := range chunk {
+			totalIssuesForProject += 1
+			c.progress[*project.Key].SetTotal(int64(totalIssuesForProject), false)
 			newIssues = append(newIssues, &i)
 			issues <- i
 		}
@@ -551,6 +553,7 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 		if last >= total {
 			break
 		}
+
 	}
 
 	for ik := range knownIssues { // Also want to reprocess
@@ -565,9 +568,6 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 			if knownIssues[ik].Fields.Project.Key == *project.Key {
 				issues <- *knownIssues[ik]
 			}
-		} else {
-			totalIssuesForProject += 1
-			c.progress[*project.Key].SetTotal(int64(totalIssuesForProject), false)
 		}
 	}
 
