@@ -30,7 +30,7 @@ type stackTracer interface {
 	StackTrace() errors.StackTrace
 }
 
-// Adapted from https://gist.github.com/PaulBradley/08598aa755a6845f46691ab363ddf7f6
+// Adapted from https://gist.github.com/PaulBradley/08598aa755a6845f46691ab363ddf7f6?permalink_comment_id=4684711#gistcomment-4684711
 func deterministicGUID(input string) string {
 	h := xxh3.HashString128(input).Bytes()
 	guid, _ := uuid.FromBytes(h[:])
