@@ -345,6 +345,45 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		output = append(output, "date-date-source:: [["+issueForDueDateCheck.Key+"]]")
 	}
 
+	hasClosedParent := false
+
+	issueForClosedCheck := issue
+
+	for {
+		if issueForClosedCheck.Fields == nil || issueForClosedCheck.Fields.Parent == nil {
+			break
+		}
+
+		var ok bool
+		_, ok = knownIssues[issueForClosedCheck.Fields.Parent.Key]
+
+		if !ok {
+			issueForClosedCheck = &jira.Issue{
+				ID:  issueForClosedCheck.Fields.Parent.ID,
+				Key: issueForClosedCheck.Fields.Parent.Key,
+			}
+		} else {
+			issueForClosedCheck = knownIssues[issueForClosedCheck.Fields.Parent.Key]
+		}
+
+		issueForClosedCheck, _, err = GetIssue(project, issueForClosedCheck, nil)
+		if err != nil {
+			return errors.Wrap(err, "Failed in GetIssue on parent "+issueForDueDateCheck.Key)
+		}
+
+		if SimplifyStatus(project, issueForClosedCheck) == "DONE" {
+			hasClosedParent = true
+			break
+		}
+
+	}
+
+	if hasClosedParent {
+		output = append(output, "has-closed-parent:: true")
+	} else {
+		output = append(output, "has-closed-parent:: false")
+	}
+
 	customFields, err := TranslateCustomFields(project, fetchedIssue)
 	if err != nil {
 		return errors.Wrap(err, "Failed in TranslateCustomFields")
