@@ -295,11 +295,54 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 	output = append(output, "date-created-sortable:: "+time.Time(issue.Fields.Created).Format("20060102"))
 
-	if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
-		if *project.Options.LinkDates {
-			output = append(output, "date-due:: [["+DateFormat(time.Time(issue.Fields.Duedate))+"]]")
+	issueForDueDateCheck := issue
+	dueDateCheckDepth := 0
+	hasDueDate := true
+
+	for {
+		if time.Time(issueForDueDateCheck.Fields.Duedate).Compare(time.Time{}) == 1 {
+			if *project.Options.LinkDates {
+				output = append(output, "date-due:: [["+DateFormat(time.Time(issueForDueDateCheck.Fields.Duedate))+"]]")
+			}
+			test := time.Time(issueForDueDateCheck.Fields.Duedate).Format("20060102")
+			slog.Debug(test)
+			output = append(output, "date-due-sortable:: "+time.Time(issueForDueDateCheck.Fields.Duedate).Format("20060102"))
+			break
 		}
-		output = append(output, "date-due-sortable:: "+time.Time(issue.Fields.Duedate).Format("20060102"))
+
+		if issueForDueDateCheck.Fields.Parent == nil {
+			hasDueDate = false
+			break
+		}
+
+		var ok bool
+		_, ok = knownIssues[issueForDueDateCheck.Fields.Parent.Key]
+
+		if !ok {
+			issueForDueDateCheck = &jira.Issue{
+				ID:  issueForDueDateCheck.Fields.Parent.ID,
+				Key: issueForDueDateCheck.Fields.Parent.Key,
+			}
+		} else {
+			issueForDueDateCheck = knownIssues[issueForDueDateCheck.Fields.Parent.Key]
+		}
+
+		issueForDueDateCheck, _, err = GetIssue(project, issueForDueDateCheck, nil)
+		if err != nil {
+			return errors.Wrap(err, "Failed in GetIssue on parent "+issueForDueDateCheck.Key)
+		}
+
+		dueDateCheckDepth += 1
+
+	}
+
+	if hasDueDate {
+		if dueDateCheckDepth == 0 {
+			output = append(output, "date-due-explicit:: yes")
+		} else {
+			output = append(output, "date-due-explicit:: no")
+		}
+		output = append(output, "date-date-source:: [["+issueForDueDateCheck.Key+"]]")
 	}
 
 	customFields, err := TranslateCustomFields(project, fetchedIssue)
