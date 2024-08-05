@@ -1024,7 +1024,7 @@ func CheckAPILimit(c *JiraConfig, resp *jira.Response) (retry bool, err error) {
 		defer c.apiLimited.Unlock()
 		resetTime, err := time.Parse("2006-01-02T15:04Z", resp.Response.Header.Get("X-Ratelimit-Reset"))
 		if err != nil {
-			resetTime = time.Now().Add(time.Minute * 2)
+			resetTime = time.Now().Add(time.Minute * 3)
 			slog.Error("Failed to parse X-Ratelimit-Reset time, defaulting to " + resetTime.Format(time.RFC822))
 			err = nil
 		}
