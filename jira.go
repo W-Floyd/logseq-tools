@@ -454,7 +454,7 @@ func SaveAttachment(project *JiraProject, a *jira.Attachment) (logseqPath string
 		})
 
 		if err != nil {
-			return "", errors.Wrap(err, "Failed in APIWrapper")
+			return "", errors.Wrap(err, "Failed in APIWrapper for attachment with filename "+a.Filename)
 		}
 
 		if o[0] == nil {
@@ -529,7 +529,7 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 			continue
 		}
 		if err != nil {
-			return errors.Wrap(err, "Failed in APIWrapper")
+			return errors.Wrap(err, "Failed in APIWrapper for getting issues using "+searchString)
 		}
 		chunk := o[0].([]jira.Issue)
 
@@ -746,7 +746,7 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 				sparseIssue.Key,
 			})
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "Failed in APIWrapper")
+				return nil, nil, errors.Wrap(err, "Failed in APIWrapper getting issue "+sparseIssue.Key)
 			}
 			fullIssue = o[0].(*jira.Issue)
 
@@ -837,7 +837,7 @@ func GetWatchers(project *JiraProject, i *jira.Issue, watchers *[]string) error 
 			i.ID,
 		})
 		if err != nil {
-			return errors.Wrap(err, "Failed in APIWrapper")
+			return errors.Wrap(err, "Failed in APIWrapper getting watchers of "+i.Key)
 		}
 		if o != nil {
 			watchingUsers := o[0].(*[]jira.User)
