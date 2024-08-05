@@ -716,24 +716,37 @@ func PrefixStringSlice(i []string, p string) (o []string) {
 	return
 }
 
+func GetCachedIssuePath(project *JiraProject, sparseIssue *jira.Issue) (filepath string, dir string, err error) {
+	if sparseIssue.Fields == nil {
+		err = errors.New("No fields to parse, possibly a truly sparse issue")
+		return
+	}
+	filepath = strings.Join([]string{project.Options.Paths.CacheRoot, sparseIssue.Key, time.Time(sparseIssue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + ".json"
+	dir = regexp.MustCompile("[^/]*$").ReplaceAllString(filepath, "")
+	return
+}
+
 func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, customFields jira.CustomFields, err error) {
+
+	ignoreCacheLocal := false
 
 	customFields = map[string]string{}
 
 	c := project.config
 
-	cachedFilePath := strings.Join([]string{project.Options.Paths.CacheRoot, sparseIssue.Key, time.Time(sparseIssue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + ".json"
+	cachedFilePath, _, err := GetCachedIssuePath(project, sparseIssue)
 
-	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
-
-	err = os.MkdirAll(dir, os.ModeDir)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "Failed to make cache directory "+dir)
+		ignoreCacheLocal = true
 	}
 
 	var jsonByteValue []byte
 
-	if _, err = os.Stat(cachedFilePath); errors.Is(err, os.ErrNotExist) || *ignoreCache {
+	if !ignoreCacheLocal || !*ignoreCache {
+		_, err = os.Stat(cachedFilePath)
+	}
+
+	if ignoreCacheLocal || *ignoreCache || errors.Is(err, os.ErrNotExist) {
 
 		if fullIssueCheck == nil {
 			slog.Info("Fetching specific info for " + sparseIssue.Key)
@@ -749,14 +762,23 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 				return nil, nil, errors.Wrap(err, "Failed in APIWrapper getting issue "+sparseIssue.Key)
 			}
 			fullIssue = o[0].(*jira.Issue)
-
-		} else {
-			fullIssue = fullIssueCheck
 		}
 
 		jsonByteValue, err = json.MarshalIndent(fullIssue, "", "  ")
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "Failed in json.Marshal")
+		}
+
+		cachedFilePath, dir, err := GetCachedIssuePath(project, fullIssue)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "Failed in GetCachedIssuePath")
+		}
+
+		if ignoreCacheLocal {
+			err = os.MkdirAll(dir, os.ModeDir)
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "Failed to make cache directory "+dir)
+			}
 		}
 
 		err = WriteFile(cachedFilePath, jsonByteValue)
