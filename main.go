@@ -207,6 +207,7 @@ func main() {
 
 		if err != nil {
 			slog.Warn("Failed to find or open file for known issues, assuming it hasn't been created yet")
+			lastRun = nil
 		} else {
 
 			byteValue, _ := io.ReadAll(jsonFile)
