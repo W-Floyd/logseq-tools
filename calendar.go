@@ -142,9 +142,7 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 			"  status:: "+e.Status,
 			"  id:: "+deterministicGUID(baseId+recurranceId.Format("20060102T150405")),
 			"  :AGENDA:",
-			"  estimated: "+strconv.Itoa(
-				durationMinutes,
-			)+"m",
+			"  estimated: "+strconv.Itoa(durationMinutes)+"m",
 			"  :END:",
 		)
 
