@@ -277,19 +277,11 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 	}
 
 	if issue.Fields.Assignee != nil {
-		nameText := issue.Fields.Assignee.DisplayName
-		if *project.Options.LinkNames {
-			nameText = "[[" + nameText + "]]"
-		}
-		output = append(output, "assignee:: "+nameText)
+		output = append(output, "assignee:: "+ProcessPersonName(issue.Fields.Assignee, project))
 	}
 
 	if issue.Fields.Reporter != nil {
-		nameText := issue.Fields.Reporter.DisplayName
-		if *project.Options.LinkNames {
-			nameText = "[[" + nameText + "]]"
-		}
-		output = append(output, "reporter:: "+nameText)
+		output = append(output, "reporter:: "+ProcessPersonName(issue.Fields.Reporter, project))
 	}
 
 	fetchedIssue, _, err = GetIssue(project, issue, fetchedIssue)
@@ -851,11 +843,7 @@ func GetWatchers(project *JiraProject, i *jira.Issue, watchers *[]string) error 
 			watchingUsers := o[0].(*[]jira.User)
 
 			for _, u := range *watchingUsers {
-				nameText := u.DisplayName
-				if *project.Options.LinkNames {
-					nameText = "[[" + nameText + "]]"
-				}
-				*watchers = append(*watchers, nameText)
+				*watchers = append(*watchers, ProcessPersonName(&u, project))
 			}
 
 			jsonBytes, err := json.MarshalIndent(watchers, "", "  ")
@@ -1148,4 +1136,12 @@ func TranslateCustomFields(project *JiraProject, issue *jira.Issue) (output []st
 
 	}
 	return
+}
+
+func ProcessPersonName(person *jira.User, project *JiraProject) string {
+	nameText := regexp.MustCompile("[0-9]").ReplaceAllString(person.DisplayName, "")
+	if *project.Options.LinkNames {
+		nameText = "[[" + nameText + "]]"
+	}
+	return nameText
 }
