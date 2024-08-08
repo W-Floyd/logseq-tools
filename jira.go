@@ -617,14 +617,9 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 
 		total := resp.Total
 		for _, i := range chunk {
+			totalIssuesForProject += 1
 			c.progress[*project.Key].SetTotal(int64(totalIssuesForProject), false)
 			newIssues = append(newIssues, &i)
-			if _, ok := knownIssues[i.Key]; !ok {
-				totalIssuesForProject += 1
-				knownIssues[i.Key] = &i
-			} else if knownIssues[i.Key].Fields != nil && lastRun != nil && time.Time(knownIssues[i.Key].Fields.Updated).After(*lastRun) {
-				knownIssues[i.Key] = &i
-			}
 			issues <- i
 		}
 		last = resp.StartAt + len(chunk)
@@ -648,6 +643,10 @@ func GetIssues(searchString string, project *JiraProject, issues chan jira.Issue
 				issues <- *knownIssues[ik]
 			}
 		}
+	}
+
+	for _, ni := range newIssues {
+		knownIssues[ni.Key] = ni
 	}
 
 	close(issues)
