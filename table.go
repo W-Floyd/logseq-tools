@@ -153,7 +153,7 @@ func (c Config) ProcessTables() error {
 
 					for _, customField := range project.Options.CustomFields {
 						switch *customField.To {
-						case "date_due_baseline":
+						case "date-due-baseline":
 							val, ok := customFields[*customField.From]
 							if val != "" && val != "<nil>" && ok {
 								dateEndBaselineTime, err := time.Parse("2006-01-02", val)
