@@ -1031,7 +1031,7 @@ func IssueMap() (parents map[string]*string, children map[string][]string) {
 func WriteIssueMap() error {
 	output := []string{}
 
-	IssueMap()
+	parents, children = IssueMap()
 
 	topLevel := []string{}
 
