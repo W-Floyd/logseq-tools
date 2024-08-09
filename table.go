@@ -36,7 +36,7 @@ func (c Config) ProcessTables() error {
 				f := excelize.NewFile()
 
 				header := []string{
-					"Epic", "Task", "Status", "Estimated Completion", "Actual Completion",
+					"Epic", "Task", "Status", "Baseline Completion", "Actual Completion",
 					"Delay",
 				}
 
