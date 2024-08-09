@@ -183,7 +183,7 @@ func ProcessProject(wg *errgroup.Group, project *JiraProject) error {
 	query := "project = " + *project.Key
 
 	if *recent {
-		query += " AND updated >= " + lastRun.Add(time.Second*-30).Format(`"2006/01/02 15:04"`)
+		query += " AND updated >= " + lastRun.Add(time.Second*-180).Format(`"2006/01/02 15:04"`)
 	}
 
 	if *timeline {
