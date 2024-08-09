@@ -298,15 +298,21 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 	issueForDueDateCheck := issue
 	dueDateCheckDepth := 0
 	hasDueDate := true
+	dueDateCheck, err := GetDueDate(issueForDueDateCheck, project)
+	if err != nil {
+		errors.Wrap(err, "Failed in GetDueDate on "+issueForDueDateCheck.Key)
+	}
 
 	for {
-		if time.Time(issueForDueDateCheck.Fields.Duedate).Compare(time.Time{}) == 1 {
+		dueDateCheck, err := GetDueDate(issueForDueDateCheck, project)
+		if err != nil {
+			errors.Wrap(err, "Failed in GetDueDate on "+issueForDueDateCheck.Key)
+		}
+		if dueDateCheck != nil {
 			if *project.Options.LinkDates {
-				output = append(output, "date-due:: [["+DateFormat(time.Time(issueForDueDateCheck.Fields.Duedate))+"]]")
+				output = append(output, "date-due:: [["+DateFormat(*dueDateCheck)+"]]")
 			}
-			test := time.Time(issueForDueDateCheck.Fields.Duedate).Format("20060102")
-			slog.Debug(test)
-			output = append(output, "date-due-sortable:: "+time.Time(issueForDueDateCheck.Fields.Duedate).Format("20060102"))
+			output = append(output, "date-due-sortable:: "+dueDateCheck.Format("20060102"))
 			break
 		}
 
@@ -424,7 +430,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 	}
 
 	if (*project.Options.IncludeTask &&
-		time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1) ||
+		dueDateCheck != nil) ||
 		(*project.Options.IncludeMyTasks &&
 			issue.Fields.Assignee != nil &&
 			issue.Fields.Assignee.DisplayName == *c.Connection.DisplayName) {
@@ -433,9 +439,9 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 			"- "+SimplifyStatus(project, issue)+" [[Jira Task]] [["+issue.Key+"]]",
 			"  id:: "+deterministicGUID(issue.Key))
 
-		if time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
-			output = append(output, "\tDEADLINE: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
-				"\tSCHEDULED: <"+time.Time(issue.Fields.Duedate).Format("2006-01-02 Mon")+">",
+		if dueDateCheck != nil {
+			output = append(output, "\tDEADLINE: <"+dueDateCheck.Format("2006-01-02 Mon")+">",
+				"\tSCHEDULED: <"+dueDateCheck.Format("2006-01-02 Mon")+">",
 			)
 		}
 	}
@@ -1248,4 +1254,46 @@ func ProcessPersonName(person *jira.User, project *JiraProject) string {
 		nameText = "[[" + nameText + "]]"
 	}
 	return nameText
+}
+
+func GetDueDate(issue *jira.Issue, project *JiraProject) (*time.Time, error) {
+
+	usesCustomField := false
+	customField := ""
+
+	for _, customFieldPair := range project.Options.CustomFields {
+		if *customFieldPair.To == "date-due" {
+			usesCustomField = true
+			customField = *(customFieldPair.From)
+			break
+		}
+	}
+
+	if usesCustomField {
+
+		_, customFields, err := GetIssue(project, issue, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		val, ok := customFields[customField]
+		if val != "" && val != "<nil>" && ok {
+			dateDue, err := time.Parse("2006-01-02", val)
+			if err != nil {
+				return nil, err
+			}
+			return &dateDue, nil
+		} else {
+			return nil, nil
+		}
+
+	}
+
+	if issue.Fields != nil && time.Time(issue.Fields.Duedate).Compare(time.Time{}) == 1 {
+		dateDue := time.Time(issue.Fields.Duedate)
+		return &dateDue, nil
+	}
+
+	return nil, nil
+
 }

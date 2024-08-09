@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"dario.cat/mergo"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
+	"github.com/pkg/errors"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -14,8 +16,25 @@ func (c Config) ProcessTables() error {
 	parents, children := IssueMap()
 
 	for _, instance := range c.Jira.Instances {
+
+		instanceOptions := c.Jira.Options
+
+		err := mergo.Merge(&instanceOptions, c.Jira.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+		if err != nil {
+			return errors.Wrap(err, "Couldn't merge GeneralOptions with InstanceOptions")
+		}
+
 		for _, project := range instance.Projects {
 			if project.Options.Outputs.Table != nil && *project.Options.Outputs.Table.Enabled {
+
+				projectOptions := instanceOptions
+
+				err := mergo.Merge(&projectOptions, project.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+				if err != nil {
+					return errors.Wrap(err, "Couldn't merge GeneralOptions with InstanceOptions")
+				}
+
+				project.Options = projectOptions
 
 				issues := []*jira.Issue{}
 
@@ -118,8 +137,24 @@ func (c Config) ProcessTables() error {
 					Parent *jira.Issue
 				}) int {
 					s := 0
-					if knownIssues[a.Issue].Fields != nil && knownIssues[b.Issue].Fields != nil {
-						s = time.Time(knownIssues[a.Issue].Fields.Duedate).Compare(time.Time(knownIssues[b.Issue].Fields.Duedate))
+					aDue, err := GetDueDate(knownIssues[a.Issue], project)
+					if err != nil {
+						errors.Wrap(err, "Failed in GetDueDate for "+knownIssues[a.Issue].Key)
+					}
+					bDue, err := GetDueDate(knownIssues[b.Issue], project)
+					if err != nil {
+						errors.Wrap(err, "Failed in GetDueDate for "+knownIssues[b.Issue].Key)
+					}
+
+					if aDue == nil {
+						aDue = &time.Time{}
+					}
+					if bDue == nil {
+						bDue = &time.Time{}
+					}
+
+					if aDue != nil && bDue != nil {
+						s = aDue.Compare(*bDue)
 					}
 					if s == 0 {
 						s = strings.Compare(a.Parent.Fields.Summary, b.Parent.Fields.Summary)
@@ -140,8 +175,12 @@ func (c Config) ProcessTables() error {
 					i += 1
 
 					dateEnd := ""
-					if time.Time(knownIssues[childIssue].Fields.Duedate).Compare(time.Time{}) == 1 {
-						dateEnd = time.Time(knownIssues[childIssue].Fields.Duedate).Format("2006/01/02")
+					dateEndTime, err := GetDueDate(knownIssues[childIssue], project)
+					if err != nil {
+						errors.Wrap(err, "Failed in GetDueDate for "+knownIssues[childIssue].Key)
+					}
+					if dateEndTime != nil {
+						dateEnd = dateEndTime.Format("2006/01/02")
 					}
 
 					_, customFields, err := GetIssue(project, knownIssues[childIssue], nil)
@@ -196,7 +235,7 @@ func (c Config) ProcessTables() error {
 							if val == "Done" {
 								style = &greenStyle
 							}
-						case "Estimated Completion":
+						case "Baseline Completion":
 							val = dateEndBaseline
 						case "Actual Completion":
 							if dateEnd != "" {
