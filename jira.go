@@ -27,6 +27,8 @@ import (
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 type JiraConfig struct {
@@ -409,7 +411,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 		for _, link := range issue.Fields.IssueLinks {
 			if link.OutwardIssue != nil {
-				links[link.Type.Name] = append(links[link.Type.Name], link.OutwardIssue.Key)
+				links[link.Type.Outward] = append(links[link.Type.Outward], link.OutwardIssue.Key)
 			}
 		}
 
@@ -419,9 +421,11 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		}
 		sort.Strings(keys)
 
+		caser := cases.Title(language.AmericanEnglish)
+
 		for _, linkType := range keys {
 			issues := links[linkType]
-			output = append(output, "- # "+linkType)
+			output = append(output, "- # "+caser.String(linkType))
 			for _, issue := range issues {
 				output = append(output, "\t- [["+issue+"]]")
 			}
