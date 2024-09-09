@@ -892,7 +892,7 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 
 		err = json.Unmarshal(jsonByteValue, &fullIssue)
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "Failed to unmarshal file")
+			return nil, nil, errors.Wrap(err, "Failed to unmarshal file "+cachedFilePath)
 		}
 
 		jiraCacheHits.IncrBy(1)
