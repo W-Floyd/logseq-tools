@@ -1262,6 +1262,10 @@ func ProcessPersonName(person *jira.User, project *JiraProject) string {
 
 func GetDueDate(issue *jira.Issue, project *JiraProject) (*time.Time, error) {
 
+	if issue == nil {
+		return nil, errors.New("Issue given is nil")
+	}
+
 	usesCustomField := false
 	customField := ""
 
