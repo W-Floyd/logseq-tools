@@ -3,10 +3,10 @@ module github.com/W-Floyd/logseq-tools
 go 1.22.2
 
 require (
-	dario.cat/mergo v1.0.0
+	dario.cat/mergo v1.0.1
 	github.com/Jeffail/gabs/v2 v2.7.0
 	github.com/MagicalTux/natsort v1.0.1
-	github.com/andygrunwald/go-jira/v2 v2.0.0-20240719054840-2aa3adf50836
+	github.com/andygrunwald/go-jira/v2 v2.0.0-20240819061203-7918d9781679
 	github.com/apognu/gocal v0.9.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
@@ -15,10 +15,11 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/segmentio/fasthash v1.0.3
 	github.com/tj/go-naturaldate v1.3.0
-	github.com/vbauerster/mpb/v8 v8.7.5
+	github.com/vbauerster/mpb/v8 v8.8.3
 	github.com/xuri/excelize/v2 v2.8.1
 	github.com/zeebo/xxh3 v1.0.2
-	golang.org/x/sync v0.7.0
+	golang.org/x/sync v0.8.0
+	golang.org/x/text v0.18.0
 )
 
 require (
@@ -39,8 +40,7 @@ require (
 	github.com/trivago/tgo v1.0.7 // indirect
 	github.com/xuri/efp v0.0.0-20240408161823-9ad904a10d6d // indirect
 	github.com/xuri/nfp v0.0.0-20240318013403-ab9948c2c4a7 // indirect
-	golang.org/x/crypto v0.25.0 // indirect
-	golang.org/x/net v0.27.0 // indirect
-	golang.org/x/sys v0.22.0 // indirect
-	golang.org/x/text v0.16.0 // indirect
+	golang.org/x/crypto v0.27.0 // indirect
+	golang.org/x/net v0.29.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
 )
