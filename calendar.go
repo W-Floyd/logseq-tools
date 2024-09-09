@@ -102,6 +102,10 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 			continue
 		}
 
+		if val, ok := e.CustomAttributes["X-MICROSOFT-CDO-BUSYSTATUS"]; ok && val == "FREE" {
+			continue
+		}
+
 		durationMinutes := int(math.Round(duration.Minutes()))
 
 		page := e.Start.Format(dateFormat)
