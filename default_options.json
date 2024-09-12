@@ -62,7 +62,8 @@
             },
             {
                 "from": [
-                    "Created by JIRA Software - do not edit or delete. Issue type for a big user story that needs to be broken down."
+                    "Created by JIRA Software - do not edit or delete. Issue type for a big user story that needs to be broken down.",
+                    "A big user story that needs to be broken down. Created by Jira Software - do not edit or delete."
                 ],
                 "to": "Epic"
             }
