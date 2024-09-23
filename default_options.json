@@ -66,6 +66,18 @@
                     "A big user story that needs to be broken down. Created by Jira Software - do not edit or delete."
                 ],
                 "to": "Epic"
+            },
+            {
+                "from": [
+                    "A task that needs to be done."
+                ],
+                "to": "Task"
+            },
+            {
+                "from": [
+                    "A problem which impairs or prevents the functions of the product."
+                ],
+                "to": "Bug"
             }
         ]
     }
