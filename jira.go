@@ -489,7 +489,9 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		}
 	}
 
-	err = WritePage(issue.Key, []byte(strings.Join(output, "\n")))
+	if *project.Options.Outputs.Logseq.Enabled {
+		err = WritePage(issue.Key, []byte(strings.Join(output, "\n")))
+	}
 
 	if err == nil {
 		c.progress[*project.Key].IncrBy(1)
@@ -1050,10 +1052,20 @@ func WriteIssueMap() error {
 		}
 	}
 
+	enabledProjects := map[string]bool{}
+
+	for _, i := range config.Jira.Instances {
+		for _, p := range i.Projects {
+			enabledProjects[*p.Key] =
+				(p.Options.Outputs.Logseq.Enabled != nil &&
+					*p.Options.Outputs.Logseq.Enabled)
+		}
+	}
+
 	natsort.Sort(topLevel)
 
 	for _, target := range topLevel {
-		err := RecurseIssueMap(target, &output, 0)
+		err := RecurseIssueMap(enabledProjects, target, &output, 0)
 		if err != nil {
 			return errors.Wrap(err, "Recursion failed on "+target+" at depth 0")
 		}
@@ -1062,7 +1074,10 @@ func WriteIssueMap() error {
 	return errors.Wrap(WritePage("Jira/Item Hierarchy", []byte(strings.Join(output, "\n"))), "Failed to write page in IssueMap")
 }
 
-func RecurseIssueMap(target string, output *([]string), depth int) error {
+func RecurseIssueMap(enabledProjects map[string]bool, target string, output *([]string), depth int) error {
+	if !enabledProjects[knownIssues[target].Fields.Project.Key] {
+		return nil
+	}
 	*output = append(*output, strings.Repeat("\t", depth)+"- [["+LogseqTitle(knownIssues[target])+"]]")
 	if depth == 0 {
 		*output = append(*output, "  collapsed:: true")
@@ -1072,7 +1087,7 @@ func RecurseIssueMap(target string, output *([]string), depth int) error {
 	natsort.Sort(targetChildren)
 
 	for _, child := range targetChildren {
-		err := RecurseIssueMap(child, output, depth+1)
+		err := RecurseIssueMap(enabledProjects, child, output, depth+1)
 		if err != nil {
 			return errors.Wrap(err, "Recursion failed on "+target+" at depth "+strconv.Itoa(depth))
 		}
