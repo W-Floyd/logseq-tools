@@ -22,6 +22,7 @@ import (
 	"github.com/Jeffail/gabs/v2"
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
+	"github.com/fatih/color"
 	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
 	"github.com/segmentio/fasthash/fnv1a"
@@ -76,9 +77,14 @@ type JiraOptions struct {
 			SearchUsers      *bool   `json:"search_users"`       // Whether to search users - may not be possible due to permissions
 			LogseqRoot       *string `json:"logseq_root"`
 		} `json:"logseq"`
+
 		Table struct {
 			Enabled *bool `json:"enabled"`
 		} `json:"table"`
+
+		Timeline struct {
+			Enabled *bool `json:"enabled"`
+		} `json:"timeline"`
 	} `json:"outputs"`
 
 	CustomFields []struct {
@@ -139,7 +145,11 @@ func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
 		pbar := progress.AddBar(0,
 			mpb.PrependDecorators(
-				decor.Name(*project.Key, decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+				decor.OnCompleteMeta(
+					decor.OnComplete(decor.Meta(decor.Spinner(nil), toMetaFunc(color.New(color.FgBlue))), "✔"),
+					toMetaFunc(color.New(color.FgGreen)),
+				),
+				decor.Name(" "+*project.Key, decor.WCSyncSpaceR),
 				decor.Name("processing", decor.WCSyncSpaceR),
 				decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
 			),
@@ -191,10 +201,6 @@ func ProcessProject(wg *errgroup.Group, project *JiraProject) error {
 		query += " AND updated >= " + lastRun.Add(time.Second*-180).Format(`"2006/01/02 15:04"`)
 	}
 
-	if *timeline {
-		query += ` AND comment ~ 'ExtractTag'`
-	}
-
 	slog.Info("Query: " + query)
 
 	go func() error {
@@ -205,18 +211,13 @@ func ProcessProject(wg *errgroup.Group, project *JiraProject) error {
 
 	for issue := range issues {
 		issue := issue
-		if *timeline {
-			errs.Go(func() error {
-				err := ProcessTimeline(wg, &issue, project)
-				return errors.Wrap(err, "Failed to ProcessTimeline "+issue.Key)
-			})
-		} else {
-			errs.Go(func() error {
-				err := ProcessIssue(wg, &issue, project)
-				return errors.Wrap(err, "Failed to ProcessIssue "+issue.Key)
-			})
-		}
+		errs.Go(func() error {
+			err := ProcessIssue(wg, &issue, project)
+			return errors.Wrap(err, "Failed to ProcessIssue "+issue.Key)
+		})
 	}
+
+	c.progress[*project.Key].SetTotal(-1, true)
 
 	return errors.Wrap(errs.Wait(), "Goroutine failed from ProcessProject")
 
@@ -591,6 +592,10 @@ func (c *JiraConfig) createClient() (*jira.Client, error) {
 	tp := jira.BasicAuthTransport{
 		Username: *c.Connection.Username,
 		APIToken: *c.Connection.APIToken,
+	}
+
+	if len(tp.APIToken) != 192 {
+		return nil, errors.New("API Token incorrect")
 	}
 	return jira.NewClient(*c.Connection.BaseURL, tp.Client())
 }

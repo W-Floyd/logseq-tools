@@ -18,7 +18,6 @@ import (
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
-	"github.com/tj/go-naturaldate"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 	"golang.org/x/sync/errgroup"
@@ -42,15 +41,14 @@ var (
 	config                      = Config{}
 	jiraApiCalls, jiraCacheHits *mpb.Bar
 	progress                    *mpb.Progress
-	timeline                    *bool
-	timelinePath                *string
 	logFile                     *string
-	timelineLookahead           *string
-	timelineLookaheadTime       *time.Time
+	logToFile                   *bool
+	includeStackTrace           *bool
 	debug                       *bool
 	verbose                     *bool
 	recent                      *bool
 	ignoreCache                 *bool
+	showProgress                *bool
 	startTime                   = time.Now()
 	lastRun                     *time.Time
 	lastRunPath                 string
@@ -62,9 +60,48 @@ var (
 	}{}
 )
 
-func init() {
+func main() {
+
+	slog.SetLogLoggerLevel(slog.LevelWarn)
+
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	var err error
+
+	configFile := flag.String("config-path", "./config.json", "Config file to use")
+	defaultOptionsFile := flag.String("default-options-file", "./default_options.json", "Default options to use")
+
+	debug = flag.Bool("debug", false, "Whether to create debug files")
+	verbose = flag.Bool("verbose", false, "Whether to print more info")
+	logFile = flag.String("log-file", "./logfile", "Log file to use")
+	logToFile = flag.Bool("log-to-file", false, "Whether to log to file")
+	showProgress = flag.Bool("progress", true, "Whether to show progress (implies log-to-file)")
+	includeStackTrace = flag.Bool("stacktrace", true, "Whether to include a stacktrace for fatal errors")
+	recent = flag.Bool("recent", true, "Whether to only check recent issues")
+	ignoreCache = flag.Bool("ignore-cache", false, "Whether to ignore cached issues")
+
+	flag.Parse()
+
+	if *verbose {
+		slog.SetLogLoggerLevel(slog.LevelInfo)
+	}
+
+	if *debug {
+		slog.SetLogLoggerLevel(slog.LevelDebug)
+	}
+
+	progressWriter := io.Discard
+
+	if *showProgress {
+		if !*logToFile {
+			slog.Warn("Logging to `" + *logFile + "` in order to show progress bars. Silence this warning by explicitly setting `log-to-file`")
+		}
+		*logToFile = true
+		progressWriter = color.Output
+	}
+
 	progress = mpb.New(
-		mpb.WithOutput(color.Output),
+		mpb.WithOutput(progressWriter),
 		mpb.WithAutoRefresh(),
 	)
 	jiraApiCalls = progress.AddBar(0,
@@ -79,60 +116,20 @@ func init() {
 			decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
 		),
 	)
-}
 
-func main() {
-
-	slog.SetLogLoggerLevel(slog.LevelWarn)
-
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	var err error
-
-	configFile := flag.String("config-path", "./config.json", "Config file to use")
-	defaultOptionsFile := flag.String("default-options-file", "./default_options.json", "Default options to use")
-
-	timeline = flag.Bool("timeline", false, "Whether to just parse timeline tags (into Markwhen)")
-	timelinePath = flag.String("timeline-path", "./timeline.mw", "Where to parse the timeline to")
-	timelineLookahead = flag.String("timeline-lookahead", "", "How far to look ahead")
-	debug = flag.Bool("debug", false, "Whether to create debug files")
-	verbose = flag.Bool("verbose", false, "Whether to print more info")
-	logFile = flag.String("log-file", "./logfile", "Log file to use")
-	recent = flag.Bool("recent", true, "Whether to only check recent issues")
-	ignoreCache = flag.Bool("ignore-cache", false, "Whether to ignore cached issues")
-
-	flag.Parse()
-
-	if *verbose {
-		slog.SetLogLoggerLevel(slog.LevelInfo)
+	if *logToFile {
+		f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			slog.Error("error opening file: " + err.Error())
+			return
+		}
+		defer f.Close()
+		log.SetOutput(f)
 	}
-
-	if *debug {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
-
-	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		slog.Error("error opening file: " + err.Error())
-		return
-	}
-	defer f.Close()
 
 	if *ignoreCache && *recent {
 		slog.Error("Cannot look for recent only without cache")
 		return
-	}
-
-	if *timeline && timelineLookahead != nil && *timelineLookahead != "" {
-		now := time.Now()
-		t, err := naturaldate.Parse(*timelineLookahead, now)
-		if err != nil {
-			slog.Error(err.Error())
-		}
-		if t == now {
-			slog.Error("Unrecognized natural date string")
-		}
-		timelineLookaheadTime = &t
 	}
 
 	configRaw, err := os.ReadFile(*configFile)
@@ -171,7 +168,7 @@ func main() {
 
 	layeredOptions, err := UnderlayOptions(&defaultOptions.Jira, &config.Jira.Options)
 	if err != nil {
-		slog.Error(err.Error())
+		ErrorStackHandler(err)
 		return
 	}
 	config.Jira.Options = *layeredOptions
@@ -183,7 +180,7 @@ func main() {
 		jsonFile, err := os.Open(lastRunPath)
 
 		if err != nil {
-			slog.Error("Failed to find or open file for last run timing, running as if you didn't specify -recent")
+			slog.Warn("Failed to find or open file for last run timing, running as if you didn't specify -recent")
 			*recent = false
 		} else {
 
@@ -225,8 +222,6 @@ func main() {
 	ctx := context.Background()
 	errs, _ := errgroup.WithContext(ctx)
 
-	log.SetOutput(f)
-
 	// Issue links
 	for _, instance := range config.Jira.Instances {
 		for _, project := range instance.Projects {
@@ -262,30 +257,21 @@ func main() {
 
 	err = errs.Wait()
 
-	if jiraApiCalls.Current() > 0 && !*timeline {
-		err = WriteIssueMap()
-		if err != nil {
-			slog.Error("Failed in WriteIssueMap: " + err.Error())
-			return
-		}
-		slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
-	}
-
 	if err != nil {
-		if err, ok := err.(stackTracer); ok {
-			for _, f := range err.StackTrace() {
-				fmt.Printf("%+s:%d\n", f, f)
-			}
-		}
-		slog.Error("Failed in instance.Process: " + err.Error())
+		ErrorStackHandler(err)
 		return
 	}
-	if *timeline {
-		err = WriteTimeline()
+
+	err = WriteIssueMap()
+	if err != nil {
+		ErrorStackHandler(err)
+		return
 	}
 
+	slog.Info("Jira API calls: " + strconv.Itoa(int(jiraApiCalls.Current())))
+
 	if err != nil {
-		slog.Error("Failed in WriteTimeline: " + err.Error())
+		ErrorStackHandler(err)
 		return
 	}
 
@@ -293,7 +279,7 @@ func main() {
 
 	err = config.ProcessTables()
 	if err != nil {
-		slog.Error("Failed in ProcessTables: " + err.Error())
+		ErrorStackHandler(err)
 		return
 	}
 
@@ -326,23 +312,17 @@ func main() {
 		return
 	}
 
-	////
-
-	if !*timeline {
-		jsonBytes, err = json.MarshalIndent(startTime, "", "  ")
-		if err != nil {
-			slog.Error("Failed in json.Marshal")
-			return
-		}
-
-		err = WriteFile(lastRunPath, jsonBytes)
-		if err != nil {
-			slog.Error("Failed in write file " + lastRunPath)
-			return
-		}
+	jsonBytes, err = json.MarshalIndent(startTime, "", "  ")
+	if err != nil {
+		slog.Error("Failed in json.Marshal")
+		return
 	}
 
-	////
+	err = WriteFile(lastRunPath, jsonBytes)
+	if err != nil {
+		slog.Error("Failed in write file " + lastRunPath)
+		return
+	}
 
 	slog.Info("exiting")
 

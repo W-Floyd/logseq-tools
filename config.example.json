@@ -41,6 +41,9 @@
                             "link_names": true,
                             "link_dates": false,
                             "search_users": false
+                        },
+                        "table": {
+                            "enabled": false
                         }
                     },
                     "type": [

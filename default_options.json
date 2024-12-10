@@ -33,6 +33,9 @@
                 "link_dates": false,
                 "search_users": false,
                 "logseq_root": "../notes"
+            },
+            "table": {
+                "enabled": false
             }
         },
         "type": [
