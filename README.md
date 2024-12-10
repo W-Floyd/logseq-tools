@@ -22,7 +22,7 @@ Config options which may help reduce API calls are:
 "include_done": false // Skips an Issue if done, saves up to 2 API calls per done Issue. No savings if include_watchers and include_comments are false.
 ```
 
-The tool does handle handle API rate limiting by pausing until the API returned retry time `X-RateLimit-Reset` ([Docs](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/)) and retrying the failed query.
+The tool does try to handle API rate limiting by pausing until the API returned retry time `X-RateLimit-Reset` ([Docs](https://developer.atlassian.com/cloud/jira/platform/rate-limiting/)) and retrying the failed query.
 
 ### Logseq slowdown
 It is recommended to have the following settings to prevent Logseq slowdowns when viewing graphs:
