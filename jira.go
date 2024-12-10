@@ -22,6 +22,7 @@ import (
 	"github.com/Jeffail/gabs/v2"
 	"github.com/MagicalTux/natsort"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
+	"github.com/jinzhu/copier"
 	"github.com/pkg/errors"
 	"github.com/segmentio/fasthash/fnv1a"
 	"github.com/vbauerster/mpb/v8"
@@ -54,30 +55,30 @@ type JiraProject struct {
 	config  *JiraConfig // Config for reference
 }
 
-type OutputFormat struct {
-	Enabled *bool
-}
-
 type JiraOptions struct {
-	Enabled          *bool `json:"enabled"`            // Whether to process this Jira project
-	IncludeWatchers  *bool `json:"include_watchers"`   // This can be slow, so you may want to disable it
-	IncludeComments  *bool `json:"include_comments"`   // This can be slow, so you may want to disable it
-	ExcludeFromGraph *bool `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
-	IncludeDone      *bool `json:"include_done"`       // Whether to include done items to help clean up the list
-	IncludeTask      *bool `json:"include_task"`       // Whether to include a task on each item with a due date
-	IncludeMyTasks   *bool `json:"include_my_tasks"`   // Whether to include my tasks in all cases
-	LinkNames        *bool `json:"link_names"`         // Whether to [[link]] names
-	LinkDates        *bool `json:"link_dates"`         // Whether to [[link]] dates
-	SearchUsers      *bool `json:"search_users"`       // Whether to search users - may not be possible due to permissions
+	Enabled *bool `json:"enabled"` // Whether to process this Jira project
 
 	Paths struct {
-		LogseqRoot string `json:"logseq_root"`
-		CacheRoot  string `json:"cache_root"`
+		CacheRoot *string `json:"cache_root"`
 	} `json:"paths"`
 
 	Outputs struct {
-		Logseq *OutputFormat
-		Table  *OutputFormat
+		Logseq struct {
+			Enabled          *bool   `json:"enabled"`
+			IncludeWatchers  *bool   `json:"include_watchers"`   // This can be slow, so you may want to disable it
+			IncludeComments  *bool   `json:"include_comments"`   // This can be slow, so you may want to disable it
+			ExcludeFromGraph *bool   `json:"exclude_from_graph"` // If you have a lot of these, it can easily pollute your graph
+			IncludeDone      *bool   `json:"include_done"`       // Whether to include done items to help clean up the list
+			IncludeTask      *bool   `json:"include_task"`       // Whether to include a task on each item with a due date
+			IncludeMyTasks   *bool   `json:"include_my_tasks"`   // Whether to include my tasks in all cases
+			LinkNames        *bool   `json:"link_names"`         // Whether to [[link]] names
+			LinkDates        *bool   `json:"link_dates"`         // Whether to [[link]] dates
+			SearchUsers      *bool   `json:"search_users"`       // Whether to search users - may not be possible due to permissions
+			LogseqRoot       *string `json:"logseq_root"`
+		} `json:"logseq"`
+		Table struct {
+			Enabled *bool `json:"enabled"`
+		} `json:"table"`
 	} `json:"outputs"`
 
 	CustomFields []struct {
@@ -111,10 +112,11 @@ var (
 
 func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
-	err = mergo.Merge(&c.Options, config.Jira.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+	instanceOptions, err := UnderlayOptions(&config.Jira.Options, &c.Options)
 	if err != nil {
 		return errors.Wrap(err, "Couldn't merge GeneralOptions with InstanceOptions")
 	}
+	c.Options = *instanceOptions
 
 	for _, p := range c.Projects {
 		p.config = c
@@ -164,12 +166,13 @@ func (c *JiraConfig) Process(wg *errgroup.Group) (err error) {
 
 func ProcessProject(wg *errgroup.Group, project *JiraProject) error {
 
-	err := mergo.Merge(&project.Options, project.config.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
-	if err != nil {
-		return errors.Wrap(err, "Couldn't merge InstanceOptions with Options")
-	}
-
 	c := project.config
+
+	lo, err := UnderlayOptions(&c.Options, &project.Options)
+	if err != nil {
+		return errors.Wrap(err, "Couldn't merge project options over config options")
+	}
+	project.Options = *lo
 
 	errs, _ := errgroup.WithContext(context.Background())
 	if c.Connection.Parallel != nil {
@@ -260,11 +263,11 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		output = append(output, "parent:: [["+issue.Fields.Parent.Key+"]]")
 	}
 
-	if *project.Options.ExcludeFromGraph {
+	if *project.Options.Outputs.Logseq.ExcludeFromGraph {
 		output = append(output, "exclude-from-graph-view:: true")
 	}
 
-	if *project.Options.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
+	if *project.Options.Outputs.Logseq.IncludeWatchers && issue.Fields.Watches != nil && issue.Fields.Watches.WatchCount > 0 {
 
 		err = GetWatchers(project, issue, watchers)
 		if err != nil {
@@ -291,7 +294,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		return errors.Wrap(err, "Failed in GetIssue")
 	}
 
-	if *project.Options.LinkDates {
+	if *project.Options.Outputs.Logseq.LinkDates {
 		output = append(output, "date-created:: [["+DateFormat(time.Time(issue.Fields.Created))+"]]")
 	}
 
@@ -311,7 +314,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 			errors.Wrap(err, "Failed in GetDueDate on "+issueForDueDateCheck.Key)
 		}
 		if dueDateCheck != nil {
-			if *project.Options.LinkDates {
+			if *project.Options.Outputs.Logseq.LinkDates {
 				output = append(output, "date-due:: [["+DateFormat(*dueDateCheck)+"]]")
 			}
 			output = append(output, "date-due-sortable:: "+dueDateCheck.Format("20060102"))
@@ -433,9 +436,9 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 	}
 
-	if (*project.Options.IncludeTask &&
+	if (*project.Options.Outputs.Logseq.IncludeTask &&
 		dueDateCheck != nil) ||
-		(*project.Options.IncludeMyTasks &&
+		(*project.Options.Outputs.Logseq.IncludeMyTasks &&
 			issue.Fields.Assignee != nil &&
 			issue.Fields.Assignee.DisplayName == *c.Connection.DisplayName) {
 		output = append(output,
@@ -450,7 +453,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		}
 	}
 
-	if *project.Options.IncludeComments {
+	if *project.Options.Outputs.Logseq.IncludeComments {
 		fetchedIssue, _, err = GetIssue(project, issue, fetchedIssue)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue")
@@ -459,7 +462,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 			output = append(output, "- ### Comments")
 			for _, comment := range fetchedIssue.Fields.Comments.Comments {
 				nameText := comment.Author.DisplayName
-				if *project.Options.LinkNames {
+				if *project.Options.Outputs.Logseq.LinkNames {
 					nameText = "[[" + nameText + "]]"
 				}
 
@@ -508,7 +511,7 @@ func SaveAttachment(project *JiraProject, a *jira.Attachment) (logseqPath string
 	filename := "assets/jira/jira_" + a.ID + filepath.Ext(a.Filename)
 
 	logseqPath = "../" + filename
-	filePath := project.Options.Paths.LogseqRoot + "/" + filename
+	filePath := *project.Options.Outputs.Logseq.LogseqRoot + "/" + filename
 
 	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
 
@@ -766,13 +769,13 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 
 				displayName, err := FindUser(project, accountID)
 				if err != nil {
-					if *project.Options.SearchUsers {
+					if *project.Options.Outputs.Logseq.SearchUsers {
 						slog.Info(err.Error() + " - Can't find user, likely an authorization error, won't bother retrying.")
-						*project.Options.SearchUsers = false
+						*project.Options.Outputs.Logseq.SearchUsers = false
 					}
 					displayName = accountID
 				} else {
-					if *project.Options.LinkNames {
+					if *project.Options.Outputs.Logseq.LinkNames {
 						displayName = "[[" + displayName + "]]"
 					}
 				}
@@ -815,7 +818,7 @@ func GetCachedIssuePath(project *JiraProject, sparseIssue *jira.Issue) (filepath
 		err = errors.New("No fields to parse, possibly a truly sparse issue")
 		return
 	}
-	filepath = strings.Join([]string{project.Options.Paths.CacheRoot, sparseIssue.Key, time.Time(sparseIssue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + ".json"
+	filepath = strings.Join([]string{*project.Options.Paths.CacheRoot, sparseIssue.Key, time.Time(sparseIssue.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + ".json"
 	dir = regexp.MustCompile("[^/]*$").ReplaceAllString(filepath, "")
 	return
 }
@@ -929,7 +932,7 @@ func GetWatchers(project *JiraProject, i *jira.Issue, watchers *[]string) error 
 		return nil
 	}
 
-	cachedFilePath := strings.Join([]string{project.Options.Paths.CacheRoot, i.Key, time.Time(i.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_watchers.json"
+	cachedFilePath := strings.Join([]string{*project.Options.Paths.CacheRoot, i.Key, time.Time(i.Fields.Updated).Format("2006-01-02T15-04-05.999999999Z07-00")}, "/") + "_watchers.json"
 
 	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
 
@@ -1191,7 +1194,7 @@ func FindUser(project *JiraProject, id string) (string, error) {
 			return users[id], nil
 		}
 	}
-	if !*project.Options.SearchUsers {
+	if !*project.Options.Outputs.Logseq.SearchUsers {
 		return id, errors.New("Cannot find given user")
 	}
 
@@ -1249,7 +1252,7 @@ func TranslateCustomFields(project *JiraProject, issue *jira.Issue) (output []st
 			if customField.As != nil {
 				switch *customField.As {
 				case "date_sortable":
-					if *project.Options.LinkDates {
+					if *project.Options.Outputs.Logseq.LinkDates {
 						date, err := time.Parse("2006-01-02", val)
 						if err != nil {
 							errors.Wrap(err, "Failed in time.Parse")
@@ -1269,7 +1272,7 @@ func TranslateCustomFields(project *JiraProject, issue *jira.Issue) (output []st
 
 func ProcessPersonName(person *jira.User, project *JiraProject) string {
 	nameText := regexp.MustCompile("[0-9]").ReplaceAllString(person.DisplayName, "")
-	if *project.Options.LinkNames {
+	if *project.Options.Outputs.Logseq.LinkNames {
 		nameText = "[[" + nameText + "]]"
 	}
 	return nameText
@@ -1318,5 +1321,38 @@ func GetDueDate(issue *jira.Issue, project *JiraProject) (*time.Time, error) {
 	}
 
 	return nil, nil
+
+}
+
+// Add a base under an option layer
+func UnderlayOptions(base *JiraOptions, layers ...(*JiraOptions)) (output *JiraOptions, err error) {
+
+	baseCopy := JiraOptions{}
+	layerCopy := JiraOptions{}
+
+	err = copier.Copy(&baseCopy, base)
+	if err != nil {
+		return nil, errors.Wrap(err, "Couldn't copy base Options in UnderlayOptions")
+	}
+
+	for _, layer := range layers {
+
+		err = copier.Copy(&layerCopy, layer)
+		if err != nil {
+			return nil, errors.Wrap(err, "Couldn't copy layer Options in UnderlayOptions")
+		}
+
+		err = mergo.Merge(&layerCopy, baseCopy, mergo.WithoutDereference, mergo.WithOverrideEmptySlice)
+		if err != nil {
+			return nil, errors.Wrap(err, "Couldn't merge InstanceOptions with Options")
+		}
+
+		baseCopy = layerCopy
+
+	}
+
+	output = &baseCopy
+
+	return
 
 }

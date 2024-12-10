@@ -164,7 +164,7 @@ func (c *CalendarConfig) Process(wg *errgroup.Group) (err error) {
 		if time.Now().Format(dateFormat) <= k || c.Exclusions.PastDates {
 			err = WriteFile(
 				path.Join(
-					config.Jira.Options.Paths.LogseqRoot,
+					*config.Jira.Options.Outputs.Logseq.LogseqRoot,
 					"pages",
 					"calendar",
 					c.Title,

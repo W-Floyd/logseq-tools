@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"dario.cat/mergo"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/fatih/color"
 	"github.com/pkg/errors"
@@ -170,13 +169,14 @@ func main() {
 		return
 	}
 
-	err = mergo.Merge(&config.Jira.Options, defaultOptions.Jira, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+	layeredOptions, err := UnderlayOptions(&defaultOptions.Jira, &config.Jira.Options)
 	if err != nil {
 		slog.Error(err.Error())
 		return
 	}
+	config.Jira.Options = *layeredOptions
 
-	lastRunPath = strings.Join([]string{config.Jira.Options.Paths.CacheRoot, "lastRun"}, "/") + ".json"
+	lastRunPath = strings.Join([]string{*config.Jira.Options.Paths.CacheRoot, "lastRun"}, "/") + ".json"
 
 	if *recent {
 
@@ -199,7 +199,7 @@ func main() {
 		}
 	}
 
-	knownIssuePath = strings.Join([]string{config.Jira.Options.Paths.CacheRoot, "knownIssues"}, "/") + ".json"
+	knownIssuePath = strings.Join([]string{*config.Jira.Options.Paths.CacheRoot, "knownIssues"}, "/") + ".json"
 
 	if !*ignoreCache {
 
@@ -350,7 +350,7 @@ func main() {
 
 func WritePage(title string, contents []byte) error {
 
-	return WriteFile(path.Join(config.Jira.Options.Paths.LogseqRoot, "pages", "jira", PageNameToFileName(title)+".md"), contents)
+	return WriteFile(path.Join(*config.Jira.Options.Outputs.Logseq.LogseqRoot, "pages", "jira", PageNameToFileName(title)+".md"), contents)
 
 }
 

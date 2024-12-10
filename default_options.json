@@ -2,18 +2,8 @@
     "jira": {
         "enabled": true,
         "paths": {
-            "logseq_root": "../notes",
             "cache_root": "./cache"
         },
-        "include_watchers": true,
-        "include_comments": true,
-        "exclude_from_graph": true,
-        "include_done": true,
-        "include_task": false,
-        "include_my_tasks": true,
-        "link_names": true,
-        "link_dates": false,
-        "search_users": false,
         "status": {
             "match": [
                 {
@@ -32,7 +22,17 @@
         },
         "outputs": {
             "logseq": {
-                "enabled": true
+                "enabled": true,
+                "include_watchers": true,
+                "include_comments": true,
+                "exclude_from_graph": true,
+                "include_done": true,
+                "include_task": false,
+                "include_my_tasks": true,
+                "link_names": true,
+                "link_dates": false,
+                "search_users": false,
+                "logseq_root": "../notes"
             }
         },
         "type": [

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"dario.cat/mergo"
 	jira "github.com/andygrunwald/go-jira/v2/cloud"
 	"github.com/pkg/errors"
 	"github.com/xuri/excelize/v2"
@@ -17,24 +16,22 @@ func (c Config) ProcessTables() error {
 
 	for _, instance := range c.Jira.Instances {
 
-		instanceOptions := c.Jira.Options
-
-		err := mergo.Merge(&instanceOptions, c.Jira.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+		instanceOptions, err := UnderlayOptions(&c.Jira.Options, &instance.Options)
 		if err != nil {
 			return errors.Wrap(err, "Couldn't merge GeneralOptions with InstanceOptions")
 		}
 
+		instance.Options = *instanceOptions
+
 		for _, project := range instance.Projects {
-			if project.Options.Outputs.Table != nil && *project.Options.Outputs.Table.Enabled {
+			if project.Options.Outputs.Table.Enabled != nil && *project.Options.Outputs.Table.Enabled {
 
-				projectOptions := instanceOptions
-
-				err := mergo.Merge(&projectOptions, project.Options, mergo.WithAppendSlice, mergo.WithOverrideEmptySlice, mergo.WithSliceDeepCopy)
+				projectOptions, err := UnderlayOptions(&instance.Options, &project.Options)
 				if err != nil {
-					return errors.Wrap(err, "Couldn't merge GeneralOptions with InstanceOptions")
+					return errors.Wrap(err, "Couldn't merge GeneralOptions with ProjectOptions")
 				}
 
-				project.Options = projectOptions
+				project.Options = *projectOptions
 
 				issues := []*jira.Issue{}
 
