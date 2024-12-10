@@ -506,6 +506,10 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 func SaveAttachment(project *JiraProject, a *jira.Attachment) (logseqPath string, err error) {
 
+	if !*project.Options.Outputs.Logseq.Enabled {
+		return "", nil
+	}
+
 	c := project.config
 
 	filename := "assets/jira/jira_" + a.ID + filepath.Ext(a.Filename)
