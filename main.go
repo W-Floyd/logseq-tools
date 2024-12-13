@@ -94,7 +94,7 @@ func main() {
 
 	if *showProgress {
 		if !*logToFile {
-			slog.Warn("Logging to `" + *logFile + "` in order to show progress bars. Silence this warning by explicitly setting `log-to-file`")
+			slog.Warn("Logging to `" + *logFile + "` in order to show progress bars. Silence this warning by explicitly setting `--log-to-file`")
 		}
 		*logToFile = true
 		progressWriter = color.Output
