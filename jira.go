@@ -881,7 +881,7 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 		}
 
 		if ignoreCacheLocal {
-			err = os.MkdirAll(dir, os.ModeDir)
+			err = os.MkdirAll(dir, 0755)
 			if err != nil {
 				return nil, nil, errors.Wrap(err, "Failed to make cache directory "+dir)
 			}
@@ -945,7 +945,7 @@ func GetWatchers(project *JiraProject, i *jira.Issue, watchers *[]string) error 
 
 	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(cachedFilePath, "")
 
-	err := os.MkdirAll(dir, os.ModeDir)
+	err := os.MkdirAll(dir, 0755)
 	if err != nil {
 		return errors.Wrap(err, "Failed to make cache directory "+dir)
 	}

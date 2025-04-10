@@ -340,7 +340,7 @@ func WriteFile(path string, contents []byte) error {
 
 	dir := regexp.MustCompile("[^/]*$").ReplaceAllString(path, "")
 
-	err := os.MkdirAll(dir, os.ModeDir)
+	err := os.MkdirAll(dir, 0755)
 	if err != nil {
 		return errors.Wrap(err, "Couldn't make directory "+dir)
 	}
