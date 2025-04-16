@@ -50,7 +50,7 @@ var (
 	ignoreCache                 *bool
 	showProgress                *bool
 	startTime                   = time.Now()
-	lastRun                     *time.Time
+	lastRun                     = map[string]map[string]*time.Time{}
 	lastRunPath                 string
 	knownIssues                 = map[string]*jira.Issue{}
 	knownIssuePath              string
@@ -312,7 +312,28 @@ func main() {
 		return
 	}
 
-	jsonBytes, err = json.MarshalIndent(startTime, "", "  ")
+	jsonBytes, err = json.MarshalIndent(attachmentBlacklist, "", "  ")
+	if err != nil {
+		slog.Error("Failed in json.Marshal")
+		return
+	}
+
+	err = WriteFile(attachmentBlacklistPath, jsonBytes)
+	if err != nil {
+		slog.Error("Failed in write file " + attachmentBlacklistPath)
+		return
+	}
+
+	for _, instance := range config.Jira.Instances {
+		if _, ok := lastRun[*instance.Connection.BaseURL]; !ok {
+			lastRun[*instance.Connection.BaseURL] = map[string]*time.Time{}
+		}
+		for _, project := range instance.Projects {
+			lastRun[*instance.Connection.BaseURL][*project.Key] = &startTime
+		}
+	}
+
+	jsonBytes, err = json.MarshalIndent(lastRun, "", "  ")
 	if err != nil {
 		slog.Error("Failed in json.Marshal")
 		return

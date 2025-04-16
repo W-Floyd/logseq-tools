@@ -198,7 +198,9 @@ func ProcessProject(wg *errgroup.Group, project *JiraProject) error {
 	query := "project = " + *project.Key
 
 	if *recent {
-		query += " AND updated >= " + lastRun.Add(time.Second*-180).Format(`"2006/01/02 15:04"`)
+		if v, ok := lastRun[*project.config.Connection.BaseURL][*project.Key]; ok {
+			query += " AND updated >= " + v.Add(time.Second*-180).Format(`"2006/01/02 15:04"`)
+		}
 	}
 
 	slog.Info("Query: " + query)
