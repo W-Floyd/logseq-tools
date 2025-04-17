@@ -48,12 +48,15 @@ var (
 	verbose                     *bool
 	recent                      *bool
 	ignoreCache                 *bool
+	ignoreAttachmentBlacklist   *bool
 	showProgress                *bool
 	startTime                   = time.Now()
 	lastRun                     = map[string]map[string]*time.Time{}
 	lastRunPath                 string
 	knownIssues                 = map[string]*jira.Issue{}
+	attachmentBlacklist         = map[string]bool{}
 	knownIssuePath              string
+	attachmentBlacklistPath     string
 	issueUrlMatchers            = []*regexp.Regexp{}
 	defaultOptions              = struct {
 		Jira JiraOptions `json:"jira"`
@@ -79,6 +82,7 @@ func main() {
 	includeStackTrace = flag.Bool("stacktrace", true, "Whether to include a stacktrace for fatal errors")
 	recent = flag.Bool("recent", true, "Whether to only check recent issues")
 	ignoreCache = flag.Bool("ignore-cache", false, "Whether to ignore cached issues")
+	ignoreAttachmentBlacklist = flag.Bool("ignore-attachment-blacklist", false, "Whether to ignore blacklisted attachments")
 
 	flag.Parse()
 
@@ -210,6 +214,29 @@ func main() {
 			byteValue, _ := io.ReadAll(jsonFile)
 
 			err = json.Unmarshal(byteValue, &knownIssues)
+			if err != nil {
+				slog.Error("Failed to unmarshal: " + err.Error())
+				return
+			}
+
+			jsonFile.Close()
+		}
+	}
+
+	attachmentBlacklistPath = strings.Join([]string{*config.Jira.Options.Paths.CacheRoot, "attachmentBlacklist"}, "/") + ".json"
+
+	if !*ignoreAttachmentBlacklist {
+
+		jsonFile, err := os.Open(attachmentBlacklistPath)
+
+		if err != nil {
+			slog.Warn("Failed to find or open file for blacklisted attachments, assuming it hasn't been created yet")
+			attachmentBlacklist = map[string]bool{}
+		} else {
+
+			byteValue, _ := io.ReadAll(jsonFile)
+
+			err = json.Unmarshal(byteValue, &attachmentBlacklist)
 			if err != nil {
 				slog.Error("Failed to unmarshal: " + err.Error())
 				return

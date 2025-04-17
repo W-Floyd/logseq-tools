@@ -686,11 +686,11 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 	description := strings.Split(JiraToMD(input), "\n")
 	descriptionFormatted := []string{""}
 
-	imageMatcher := `(?U)(!\[\]\()([^\)]+)\)`
+	attachmentMatcher := `(?U)(!\[\]\()([^\)]+)\)`
 
-	re := regexp.MustCompile(imageMatcher)
+	re := regexp.MustCompile(attachmentMatcher)
 
-	imageReplacements := map[string]string{}
+	attachmentReplacements := map[string]string{}
 
 	for _, l := range description {
 
@@ -700,29 +700,38 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 			filename := re.ReplaceAllString(match, `$2`)
 			filepath := ""
 			if !strings.HasPrefix(filename, "http") {
-				if _, ok := imageReplacements[filename]; !ok {
+				if _, ok := attachmentReplacements[filename]; !ok {
 					found := false
-					for _, attachment := range issue.Fields.Attachments {
-						if attachment.Filename == filename {
-							filepath, err = SaveAttachment(project, attachment)
-							if err != nil {
-								return nil, errors.Wrap(err, "Failed to save attachment "+attachment.ID)
+
+					_, blacklisted := attachmentBlacklist[filename]
+
+					if !blacklisted {
+						for _, attachment := range issue.Fields.Attachments {
+							if attachment.Filename == filename {
+								filepath, err = SaveAttachment(project, attachment)
+								if err != nil {
+									return nil, errors.Wrap(err, "Failed to save attachment "+attachment.ID)
+								}
+								found = true
+								break
 							}
-							found = true
-							break
 						}
-					}
-					if found {
-						imageReplacements[filename] = filepath
+						if found {
+							attachmentReplacements[filename] = filepath
+						} else {
+							slog.Warn("Did not find attachment for " + filename + ", adding to blacklist")
+							attachmentReplacements[filename] = filename
+							attachmentBlacklist[filename] = true
+						}
 					} else {
-						slog.Warn("Did not find attachment for " + filename)
-						imageReplacements[filename] = filename
+						slog.Warn("Skipping blacklisted attachment " + filename)
+						attachmentReplacements[filename] = filename
 					}
 				}
 
-				l = strings.ReplaceAll(l, filename, imageReplacements[filename])
+				l = strings.ReplaceAll(l, filename, attachmentReplacements[filename])
 
-				l = re.ReplaceAllString(l, `![`+imageReplacements[filename]+`]($2)`)
+				l = re.ReplaceAllString(l, `![`+attachmentReplacements[filename]+`]($2)`)
 			}
 
 		}
