@@ -162,7 +162,7 @@ func JiraToMD(str string) string {
 			repl: `\$`,
 		},
 		{ // Image dimentions, would like to eventually make this into the logseq format we know
-			re:   regexp.MustCompile(`\|(width|height|thumbnail|smart|alt)[^\)]*\)`),
+			re:   regexp.MustCompile(`\|(width|height|thumbnail|smart|alt|size)[^\)]*\)`),
 			repl: `)`,
 		},
 	}
