@@ -724,7 +724,7 @@ func ParseJiraText(project *JiraProject, input string, issue *jira.Issue) ([]str
 							attachmentBlacklist[filename] = true
 						}
 					} else {
-						slog.Warn("Skipping blacklisted attachment " + filename)
+						slog.Warn(issue.Key + " - Skipping blacklisted attachment " + filename)
 						attachmentReplacements[filename] = filename
 					}
 				}
