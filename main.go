@@ -49,6 +49,7 @@ var (
 	recent                      *bool
 	ignoreCache                 *bool
 	ignoreAttachmentBlacklist   *bool
+	skipCached                  *bool
 	showProgress                *bool
 	startTime                   = time.Now()
 	lastRun                     = map[string]map[string]*time.Time{}
@@ -83,6 +84,7 @@ func main() {
 	recent = flag.Bool("recent", true, "Whether to only check recent issues")
 	ignoreCache = flag.Bool("ignore-cache", false, "Whether to ignore cached issues")
 	ignoreAttachmentBlacklist = flag.Bool("ignore-attachment-blacklist", false, "Whether to ignore blacklisted attachments")
+	skipCached = flag.Bool("skip-cached", true, "Whether to skip processing cached issues")
 
 	flag.Parse()
 

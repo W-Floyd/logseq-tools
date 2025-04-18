@@ -180,7 +180,7 @@ func (c Config) ProcessTables() error {
 						dateEnd = dateEndTime.Format("2006/01/02")
 					}
 
-					_, customFields, err := GetIssue(project, knownIssues[childIssue], nil)
+					_, customFields, err, _ := GetIssue(project, knownIssues[childIssue], nil)
 					if err != nil {
 						return err
 					}

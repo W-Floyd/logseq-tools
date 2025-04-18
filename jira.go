@@ -248,6 +248,14 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		}
 	}
 
+	fetchedIssue, _, err, wasCached := GetIssue(project, issue, fetchedIssue)
+	if err != nil {
+		return errors.Wrap(err, "Failed in GetIssue")
+	}
+	if wasCached && *skipCached {
+		return nil
+	}
+
 	slog.Info("Processing Issue: " + issue.Key)
 
 	output := []string{
@@ -290,11 +298,6 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 
 	if issue.Fields.Reporter != nil {
 		output = append(output, "reporter:: "+ProcessPersonName(issue.Fields.Reporter, project))
-	}
-
-	fetchedIssue, _, err = GetIssue(project, issue, fetchedIssue)
-	if err != nil {
-		return errors.Wrap(err, "Failed in GetIssue")
 	}
 
 	if *project.Options.Outputs.Logseq.LinkDates {
@@ -341,7 +344,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 			issueForDueDateCheck = knownIssues[issueForDueDateCheck.Fields.Parent.Key]
 		}
 
-		issueForDueDateCheck, _, err = GetIssue(project, issueForDueDateCheck, nil)
+		issueForDueDateCheck, _, err, _ = GetIssue(project, issueForDueDateCheck, nil)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue on parent "+issueForDueDateCheck.Key)
 		}
@@ -380,7 +383,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 			issueForClosedCheck = knownIssues[issueForClosedCheck.Fields.Parent.Key]
 		}
 
-		issueForClosedCheck, _, err = GetIssue(project, issueForClosedCheck, nil)
+		issueForClosedCheck, _, err, _ = GetIssue(project, issueForClosedCheck, nil)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue on parent "+issueForDueDateCheck.Key)
 		}
@@ -457,7 +460,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 	}
 
 	if *project.Options.Outputs.Logseq.IncludeComments {
-		fetchedIssue, _, err = GetIssue(project, issue, fetchedIssue)
+		fetchedIssue, _, err, _ = GetIssue(project, issue, fetchedIssue)
 		if err != nil {
 			return errors.Wrap(err, "Failed in GetIssue")
 		}
@@ -843,7 +846,7 @@ func GetCachedIssuePath(project *JiraProject, sparseIssue *jira.Issue) (filepath
 	return
 }
 
-func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, customFields jira.CustomFields, err error) {
+func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jira.Issue) (fullIssue *jira.Issue, customFields jira.CustomFields, err error, wasCached bool) {
 
 	ignoreCacheLocal := false
 
@@ -876,43 +879,43 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 				sparseIssue.Key,
 			})
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "Failed in APIWrapper getting issue "+sparseIssue.Key)
+				return nil, nil, errors.Wrap(err, "Failed in APIWrapper getting issue "+sparseIssue.Key), wasCached
 			}
 			fullIssue = o[0].(*jira.Issue)
 		}
 
 		jsonByteValue, err = json.MarshalIndent(fullIssue, "", "  ")
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "Failed in json.Marshal")
+			return nil, nil, errors.Wrap(err, "Failed in json.Marshal"), wasCached
 		}
 
 		cachedFilePath, dir, err := GetCachedIssuePath(project, fullIssue)
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "Failed in GetCachedIssuePath")
+			return nil, nil, errors.Wrap(err, "Failed in GetCachedIssuePath"), wasCached
 		}
 
 		if ignoreCacheLocal {
 			err = os.MkdirAll(dir, 0755)
 			if err != nil {
-				return nil, nil, errors.Wrap(err, "Failed to make cache directory "+dir)
+				return nil, nil, errors.Wrap(err, "Failed to make cache directory "+dir), wasCached
 			}
 		}
 
 		err = WriteFile(cachedFilePath, jsonByteValue)
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "Failed in write file "+cachedFilePath)
+			return nil, nil, errors.Wrap(err, "Failed in write file "+cachedFilePath), wasCached
 		}
 
 	} else if err != nil {
 
-		return nil, nil, errors.Wrap(err, cachedFilePath)
+		return nil, nil, errors.Wrap(err, cachedFilePath), wasCached
 
 	} else {
 
 		jsonFile, err := os.Open(cachedFilePath)
 
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "Failed to open file")
+			return nil, nil, errors.Wrap(err, "Failed to open file"), wasCached
 		}
 
 		defer jsonFile.Close()
@@ -921,16 +924,17 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 
 		err = json.Unmarshal(jsonByteValue, &fullIssue)
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "Failed to unmarshal file "+cachedFilePath)
+			return nil, nil, errors.Wrap(err, "Failed to unmarshal file "+cachedFilePath), wasCached
 		}
 
 		jiraCacheHits.IncrBy(1)
+		wasCached = true
 
 	}
 
 	jsonParsed, err := gabs.ParseJSON(jsonByteValue)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "Failed to unmarshal raw json: "+string(jsonByteValue))
+		return nil, nil, errors.Wrap(err, "Failed to unmarshal raw json: "+string(jsonByteValue)), wasCached
 	}
 
 	for _, customField := range project.Options.CustomFields {
@@ -940,7 +944,7 @@ func GetIssue(project *JiraProject, sparseIssue *jira.Issue, fullIssueCheck *jir
 		}
 	}
 
-	return fullIssue, customFields, nil
+	return fullIssue, customFields, nil, wasCached
 
 }
 
@@ -1261,7 +1265,7 @@ func JiraTypeSubstitute(project *JiraProject, issue *jira.Issue) string {
 
 func TranslateCustomFields(project *JiraProject, issue *jira.Issue) (output []string, err error) {
 
-	_, customFields, err := GetIssue(project, issue, nil)
+	_, customFields, err, _ := GetIssue(project, issue, nil)
 	if err != nil {
 		errors.Wrap(err, "Failed in GetCustomFields")
 	}
@@ -1317,7 +1321,7 @@ func GetDueDate(issue *jira.Issue, project *JiraProject) (*time.Time, error) {
 
 	if usesCustomField {
 
-		_, customFields, err := GetIssue(project, issue, nil)
+		_, customFields, err, _ := GetIssue(project, issue, nil)
 		if err != nil {
 			return nil, err
 		}
