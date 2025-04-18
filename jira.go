@@ -253,6 +253,7 @@ func ProcessIssue(wg *errgroup.Group, issue *jira.Issue, project *JiraProject) (
 		return errors.Wrap(err, "Failed in GetIssue")
 	}
 	if wasCached && *skipCached {
+		c.progress[*project.Key].IncrBy(1)
 		return nil
 	}
 
